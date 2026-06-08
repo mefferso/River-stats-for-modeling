@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Generated river data/model outputs
+# Raw USGS historical files can get large. Keep the .gitkeep placeholders only.
+data/raw/*.csv
+data/processed/*.csv
+output/models/*
+output/reports/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!output/models/.gitkeep
+!output/reports/.gitkeep
+
+# Local cruft
+.DS_Store
+Thumbs.db
+.ipynb_checkpoints/
