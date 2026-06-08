@@ -2,13 +2,13 @@
 
 Builds station-specific crest / remaining-rise models from historical USGS stage data for local river forecast points.
 
-This is meant to be an **operational aid**, not official guidance. The whole point is to build something auditable that can answer:
+This is meant to be an **operational aid**, not official guidance. The core question is:
 
 > Given the current stage, recent rate of rise, momentum, and rise-start stage, how much more rise usually remains at this forecast point?
 
 ## What it produces
 
-For each river forecast point with a valid USGS gage-height mapping, the script can produce:
+For each forecast point with a valid USGS gage-height mapping, the toolkit can produce:
 
 - detected historical rise/crest events
 - training rows sampled through each event
@@ -31,7 +31,7 @@ Raw USGS CSVs land in:
 data/raw/
 ```
 
-Those generated files are gitignored so the repo does not become a bloated river-data swamp monster.
+Generated data/model files are gitignored so the repo does not become a bloated river-data swamp monster.
 
 ---
 
@@ -39,15 +39,17 @@ Those generated files are gitignored so the repo does not become a bloated river
 
 ```text
 config/
-  sites.csv                 # LIDs, names, optional USGS IDs and thresholds
+  sites.csv                    # LIDs, USGS IDs, optional thresholds
+  sites_with_usgs.csv          # discovered LID-to-USGS mapping
 src/
-  nwps_multigage_model.py   # main CLI
+  nwps_multigage_model.py      # discovery, download, original trainer, forecast/status
+  crest_eventset_train.py      # flood/moderate/major event-set trainer
 data/
-  raw/                      # downloaded USGS stage CSVs
-  processed/                # events + training/scored rows
+  raw/                         # downloaded USGS stage CSVs
+  processed/                   # events + training/scored rows
 output/
-  models/                   # joblib model files
-  reports/                  # summary CSV + equation JSONs
+  models/                      # joblib model files
+  reports/                     # summary CSV + equation JSONs
 .github/workflows/
   python-check.yml
   run-river-model.yml
@@ -56,8 +58,6 @@ output/
 ---
 
 ## Local setup
-
-From the repo folder:
 
 ```bash
 python -m venv .venv
@@ -81,7 +81,7 @@ pip install -r requirements.txt
 
 ---
 
-## Basic workflow
+## Recommended workflow
 
 ### 1) Discover USGS IDs
 
@@ -89,88 +89,113 @@ pip install -r requirements.txt
 python src/nwps_multigage_model.py discover-sites --sites config/sites.csv --output config/sites_with_usgs.csv
 ```
 
-Then open `config/sites_with_usgs.csv` and review the `usgs_site` column.
+Review `config/sites_with_usgs.csv`. Some LIDs may not auto-map cleanly and need manual USGS IDs.
 
-This step is best-effort. Some LIDs may not auto-map cleanly from NWPS metadata. Those blanks need manual USGS site IDs. Bad mappings will wreck the model, because garbage in / garbage out is undefeated.
+### 2) Try to fill flood-category thresholds
 
-### 2) Download 15 years of stage data
+```bash
+python src/crest_eventset_train.py discover-thresholds --sites config/sites_with_usgs.csv --output config/sites_with_usgs.csv
+```
+
+This attempts to fill:
+
+```text
+action_stage_ft
+minor_stage_ft
+flood_stage_ft
+moderate_stage_ft
+major_stage_ft
+```
+
+Review those values before trusting them. The threshold discovery is best-effort because NWPS metadata can be annoyingly inconsistent.
+
+### 3) Download 15 years of USGS stage data
 
 ```bash
 python src/nwps_multigage_model.py download --sites config/sites_with_usgs.csv --years 15
 ```
 
-To test only the first site:
+Smoke test first site only:
 
 ```bash
 python src/nwps_multigage_model.py download --sites config/sites_with_usgs.csv --years 1 --limit 1
 ```
 
-### 3) Train station-specific models
+### 4) Train event-set models
+
+Flood/minor-plus events:
 
 ```bash
-python src/nwps_multigage_model.py train --sites config/sites_with_usgs.csv
+python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set flood
 ```
 
-To test only the first site:
+Moderate-plus events:
 
 ```bash
-python src/nwps_multigage_model.py train --sites config/sites_with_usgs.csv --limit 1
+python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set moderate
 ```
 
-### 4) Run the whole pipeline
+Major-plus events:
 
 ```bash
-python src/nwps_multigage_model.py run-all --sites config/sites.csv --years 15
+python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set major
 ```
 
-Smoke test only first site / one year:
+Custom minimum crest stage:
 
 ```bash
-python src/nwps_multigage_model.py run-all --sites config/sites.csv --years 1 --limit 1
+python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set custom --min-crest-stage 18
 ```
+
+Smoke test first site only:
+
+```bash
+python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set flood --limit 1
+```
+
+---
+
+## How event selection works
+
+The event-set trainer separates two concepts:
+
+| Concept | Purpose |
+|---|---|
+| Event-start threshold | Finds the event window and captures the rising limb |
+| Minimum crest stage | Decides whether the event is worth training on |
+
+Event windows start using the first available threshold in this order:
+
+1. `event_start_threshold_ft`
+2. `event_threshold_ft`
+3. `action_stage_ft`
+4. `minor_stage_ft`
+5. `flood_stage_ft`
+6. automatic upper-percentile fallback
+
+Training inclusion then depends on the event set:
+
+| `--event-set` | Keeps events where crest reaches... |
+|---|---|
+| `flood` | `minor_stage_ft`, falling back to `flood_stage_ft` |
+| `moderate` | `moderate_stage_ft` |
+| `major` | `major_stage_ft` |
+| `custom` | `--min-crest-stage` |
+| `all` | no crest-stage filter beyond minimum total rise |
+
+This prevents the model from learning from every little 1-foot wiggle while still capturing early rising-limb behavior before the crest.
 
 ---
 
 ## Forecast manually
 
-Example using McNeil-style inputs:
+The original forecast command still works for models produced by `nwps_multigage_model.py`:
 
 ```bash
 python src/nwps_multigage_model.py forecast --lid MNLM6 --stage 13.8 --h0 12.3 --r1 1.4 --r3 1.1 --r6 0.8 --r12 0.5 --elapsed 4
 ```
 
-The forecast output includes:
-
-- `pred_crest_stage_ft` = most likely model crest
-- `low_reasonable_crest_ft` = likely minus model MAE, not below current stage
-- `conservative_crest_ft` = likely plus MAE / 75th percentile underforecast allowance
-- `high_conservative_crest_ft` = likely plus 90th percentile underforecast allowance
-
-That gives you something closer to the way you actually think operationally: most likely, conservative, and “don’t get burned by the bastard” range.
-
----
-
-## Forecast from latest downloaded data
-
-After training a model and downloading fresh-ish data:
-
-```bash
-python src/nwps_multigage_model.py forecast-latest --lid MNLM6
-```
-
-This infers:
-
-- latest stage
-- H0 from the last 72 hours
-- elapsed rise time
-- R1/R3/R6/R12
-- momentum terms
-
-You can change the H0 lookback:
-
-```bash
-python src/nwps_multigage_model.py forecast-latest --lid MNLM6 --h0-lookback-hours 96
-```
+Event-set forecast wiring will be the next cleanup step after we inspect flood/moderate model summaries.
 
 ---
 
@@ -180,50 +205,9 @@ python src/nwps_multigage_model.py forecast-latest --lid MNLM6 --h0-lookback-hou
 python src/nwps_multigage_model.py status --sites config/sites_with_usgs.csv
 ```
 
-This shows each LID, USGS mapping, raw data availability, raw date range, and whether a model exists.
-
----
-
-## Event detection knobs
-
-Training uses an event threshold in this order:
-
-1. `event_threshold_ft` from `config/sites.csv`, if filled
-2. `action_stage_ft`, if filled
-3. `flood_stage_ft`, if filled
-4. automatic fallback using upper-stage percentiles
-
-Optional train/run-all knobs:
-
-```bash
---min-total-rise 1.0
---below-hours 24
---h0-lookback-hours 48
---pre-event-hours 24
---sample-interval 1h
-```
-
-Examples:
-
-```bash
-python src/nwps_multigage_model.py train --sites config/sites_with_usgs.csv --min-total-rise 2.0 --h0-lookback-hours 72
-```
-
-```bash
-python src/nwps_multigage_model.py run-all --sites config/sites.csv --years 15 --below-hours 36
-```
-
 ---
 
 ## GitHub Actions
-
-Two workflows are included.
-
-### Python check
-
-Runs automatically on push and verifies the script compiles and the CLI loads.
-
-### Run river model
 
 Go to:
 
@@ -231,37 +215,31 @@ Go to:
 Actions → Run river model → Run workflow
 ```
 
-Modes:
-
-- `smoke`: discover + 1 year download + train first N sites
-- `discover`: only create `config/sites_with_usgs.csv`
-- `download`: download stage data using `config/sites_with_usgs.csv`
-- `train`: train models using existing downloaded data
-- `run-all`: discover + download + train
-- `status`: print repo/model status
-
-Start with:
+Recommended smoke test:
 
 ```text
 mode = smoke
 years = 1
 limit = 1
+event_set = flood
 ```
 
-Then graduate to:
+Then try full flood-plus:
 
 ```text
 mode = run-all
 years = 15
 limit = 0
+event_set = flood
 ```
 
-The workflow uploads `river-model-output` as an artifact containing discovered mappings, processed data, reports, and models.
+Then compare moderate-plus:
 
----
+```text
+mode = run-all
+years = 15
+limit = 0
+event_set = moderate
+```
 
-## Current site list
-
-The initial list includes Amite, Comite, Tickfaw, Natalbany, Tangipahoa, Tchefuncte, Bogue Falaya, Bogue Chitto, Pearl, Hobolochitto, Jourdan, Wolf, Biloxi, Tchoutacabouffa, Pascagoula, and Escatawpa forecast points.
-
-Edit `config/sites.csv` to add/remove stations or to manually set USGS IDs and thresholds.
+The workflow uploads `river-model-output` containing discovered mappings, processed event/training rows, reports, and models.
