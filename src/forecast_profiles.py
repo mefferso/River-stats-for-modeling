@@ -46,6 +46,14 @@ def clean(value: Any) -> Any:
     return value
 
 
+def clean_raw_stage(raw: pd.DataFrame) -> pd.DataFrame:
+    df = raw.copy()
+    df["stage_ft"] = pd.to_numeric(df.get("stage_ft"), errors="coerce")
+    # USGS/no-data sentinels such as -999999 occasionally sneak through. Toss anything impossible.
+    df = df[(df["stage_ft"] > -1000) & (df["stage_ft"] < 200)]
+    return df
+
+
 def nearest_stage_at_or_before(df: pd.DataFrame, when: pd.Timestamp) -> float | None:
     older = df[df["datetime"] <= when]
     if older.empty:
@@ -81,7 +89,7 @@ def load_profile_summary(path: Path) -> dict[str, dict[str, Any]]:
     return {str(row["lid"]): row.to_dict() for _, row in df.iterrows()}
 
 
-def confidence_bucket(status: str, profile: dict[str, Any], stage: float, model_meta: dict[str, Any] | None) -> str:
+def confidence_bucket(status: str, profile: dict[str, Any]) -> str:
     if status != "ok":
         return "none"
     event_count = finite_float(profile.get("event_count")) or 0
@@ -110,12 +118,29 @@ def profile_label(profile: pd.Series) -> tuple[str, float | None, str]:
     return event_set, min_crest, settings.label
 
 
-def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    lid = str(site["lid"]).upper()
-    event_set, min_crest, label = profile_label(profile)
-    reason = str(profile.get("reason", ""))
+def active_event_flag(
+    site: pd.Series,
+    df: pd.DataFrame,
+    current_stage: float,
+    h0_stage: float,
+    r3: float,
+    args: argparse.Namespace,
+) -> tuple[bool, float, str]:
+    start_threshold = event_train.event_start_threshold(df["stage_ft"], site)
+    stage_rise = current_stage - h0_stage
+    active = current_stage >= start_threshold or (stage_rise >= args.min_stage_rise_ft and r3 >= args.min_r3_rise_rate)
+    if active:
+        if current_stage >= start_threshold:
+            return True, start_threshold, "current stage at/above event-start threshold"
+        return True, start_threshold, "early rise: stage/rate criteria met"
+    return False, start_threshold, "inactive: below threshold and not rising enough"
 
-    row: dict[str, Any] = {
+
+def base_row(site: pd.Series, profile: pd.Series) -> dict[str, Any]:
+    lid = str(site["lid"]).upper()
+    event_set, _min_crest, label = profile_label(profile)
+    reason = str(profile.get("reason", ""))
+    return {
         "lid": lid,
         "name": site.get("name", ""),
         "usgs_site": site.get("usgs_site", ""),
@@ -125,6 +150,13 @@ def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, A
         "forecast_status": "",
         "forecast_note": "",
     }
+
+
+def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    lid = str(site["lid"]).upper()
+    event_set, _min_crest, label = profile_label(profile)
+    reason = str(profile.get("reason", ""))
+    row = base_row(site, profile)
 
     if event_set == "skip":
         row.update({"forecast_status": "skipped", "forecast_note": reason, "confidence": "none"})
@@ -140,7 +172,7 @@ def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, A
         row.update({"forecast_status": "missing_model", "forecast_note": f"missing {model_file}", "confidence": "none"})
         return row
 
-    df = base.prep_stage(pd.read_csv(raw))
+    df = base.prep_stage(clean_raw_stage(pd.read_csv(raw)))
     if df.empty:
         row.update({"forecast_status": "empty_raw", "forecast_note": "no usable stage rows", "confidence": "none"})
         return row
@@ -153,6 +185,31 @@ def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, A
     r3 = rate(df, current_time, current_stage, 3)
     r6 = rate(df, current_time, current_stage, 6)
     r12 = rate(df, current_time, current_stage, 12)
+    active, start_threshold, active_note = active_event_flag(site, df, current_stage, h0_stage, r3, args)
+
+    shared = {
+        "forecast_time_utc": current_time.isoformat(),
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "current_stage_ft": current_stage,
+        "h0_stage_ft": h0_stage,
+        "elapsed_hr_since_rise_start": elapsed,
+        "r1_ft_per_hr": r1,
+        "r3_ft_per_hr": r3,
+        "r6_ft_per_hr": r6,
+        "r12_ft_per_hr": r12,
+        "event_start_threshold_used_ft": start_threshold,
+        "model_mae_ft": profile_skill.get("mae_ft", ""),
+        "model_bias_ft": profile_skill.get("bias_ft", ""),
+        "model_event_count": profile_skill.get("event_count", ""),
+        "model_holdout_events": profile_skill.get("holdout_events", ""),
+        "model_r2": profile_skill.get("r2", ""),
+        "model_file": str(model_file),
+    }
+    row.update(shared)
+
+    if not active:
+        row.update({"forecast_status": "inactive", "forecast_note": active_note, "confidence": "none"})
+        return row
 
     features = pd.DataFrame(
         [
@@ -185,31 +242,17 @@ def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, A
     bias_corrected = likely - bias
     conservative = max(likely, bias_corrected + max(0.0, under_p75))
     high_end = max(conservative, bias_corrected + max(0.0, under_p90))
-    confidence = confidence_bucket("ok", profile_skill, current_stage, meta)
+    confidence = confidence_bucket("ok", profile_skill)
 
     row.update(
         {
             "forecast_status": "ok",
-            "forecast_time_utc": current_time.isoformat(),
-            "generated_utc": datetime.now(timezone.utc).isoformat(),
-            "current_stage_ft": current_stage,
-            "h0_stage_ft": h0_stage,
-            "elapsed_hr_since_rise_start": elapsed,
-            "r1_ft_per_hr": r1,
-            "r3_ft_per_hr": r3,
-            "r6_ft_per_hr": r6,
-            "r12_ft_per_hr": r12,
+            "forecast_note": active_note,
             "pred_remaining_rise_ft": remaining,
             "pred_crest_likely_ft": likely,
             "pred_crest_conservative_ft": conservative,
             "pred_crest_high_end_ft": high_end,
             "confidence": confidence,
-            "model_mae_ft": mae,
-            "model_bias_ft": bias,
-            "model_event_count": profile_skill.get("event_count", ""),
-            "model_holdout_events": profile_skill.get("holdout_events", ""),
-            "model_r2": profile_skill.get("r2", ""),
-            "model_file": str(model_file),
         }
     )
     return row
@@ -241,6 +284,8 @@ def main() -> None:
     parser.add_argument("--profile-summary", default=str(base.REPORT_DIR / "model_profile_summary.csv"))
     parser.add_argument("--lids", default="", help="Optional comma-separated LIDs")
     parser.add_argument("--h0-lookback-hours", type=float, default=48.0)
+    parser.add_argument("--min-stage-rise-ft", type=float, default=0.75)
+    parser.add_argument("--min-r3-rise-rate", type=float, default=0.05)
     parser.add_argument("--output-csv", default=str(FORECAST_DIR / "latest_forecasts.csv"))
     parser.add_argument("--output-json", default=str(FORECAST_DIR / "latest_forecasts.json"))
     parser.add_argument("--docs-json", default=str(DOCS_DIR / "latest_forecasts.json"))
