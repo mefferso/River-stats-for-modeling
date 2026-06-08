@@ -1,0 +1,1082 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LIX River Crest Model Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --line: #263244;
+      --good: #14532d;
+      --med: #854d0e;
+      --low: #7f1d1d;
+      --none: #374151;
+      --accent: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 22px 28px 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, #111827, #0f172a);
+    }
+    h1 { margin: 0 0 6px; font-size: 1.45rem; }
+    .sub { color: var(--muted); font-size: 0.92rem; }
+    main { padding: 18px 28px 32px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .card .label { color: var(--muted); font-size: 0.8rem; }
+    .card .value { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 0 0 14px;
+    }
+    input, select {
+      background: #0b1220;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 0.9rem;
+    }
+    input { min-width: 230px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    table { border-collapse: collapse; min-width: 1250px; width: 100%; }
+    th, td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      white-space: nowrap;
+      font-size: 0.86rem;
+    }
+    th {
+      color: #cbd5e1;
+      background: #111827;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      cursor: pointer;
+    }
+    td.left, th.left { text-align: left; }
+    tr:hover { background: #172033; }
+    .pill {
+      display: inline-block;
+      min-width: 56px;
+      text-align: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .high { background: var(--good); color: #dcfce7; }
+    .medium { background: var(--med); color: #fef3c7; }
+    .low { background: var(--low); color: #fee2e2; }
+    .none { background: var(--none); color: #e5e7eb; }
+    .ok { color: #86efac; }
+    .skipped, .missing_model, .missing_raw, .empty_raw { color: #fca5a5; }
+    footer { color: var(--muted); font-size: 0.78rem; margin-top: 14px; line-height: 1.45; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LIX River Crest Model Dashboard</h1>
+    <div class="sub" id="generated">Loading latest forecast output…</div>
+  </header>
+  <main>
+    <section class="cards" id="cards"></section>
+    <section class="controls">
+      <input id="search" placeholder="Filter by LID, name, model, status…" />
+      <select id="confidence">
+        <option value="">All confidence levels</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="none">None / skipped</option>
+      </select>
+      <select id="status">
+        <option value="">All statuses</option>
+        <option value="ok">OK</option>
+        <option value="skipped">Skipped</option>
+        <option value="missing_model">Missing model</option>
+        <option value="missing_raw">Missing raw</option>
+      </select>
+    </section>
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left" data-key="lid">LID</th>
+            <th class="left" data-key="name">Name</th>
+            <th data-key="current_stage_ft">Stage</th>
+            <th data-key="r1_ft_per_hr">1h rate</th>
+            <th data-key="r3_ft_per_hr">3h rate</th>
+            <th data-key="pred_remaining_rise_ft">Remain</th>
+            <th data-key="pred_crest_likely_ft">Likely crest</th>
+            <th data-key="pred_crest_conservative_ft">Conservative</th>
+            <th data-key="pred_crest_high_end_ft">High-end</th>
+            <th class="left" data-key="run_label">Model</th>
+            <th class="left" data-key="confidence">Confidence</th>
+            <th data-key="model_event_count">Events</th>
+            <th data-key="model_mae_ft">MAE</th>
+            <th data-key="model_bias_ft">Bias</th>
+            <th class="left" data-key="forecast_status">Status</th>
+            <th class="left" data-key="forecast_note">Note</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+    <footer>
+      Experimental statistical aid only. Forecast crests are based on historical stage/rise behavior and should be reviewed against official hydrologic guidance, rainfall, backwater, tide/wind, and basin context.
+    </footer>
+  </main>
+
+  <script>
+    let forecasts = [];
+    let sortKey = 'lid';
+    let sortDir = 1;
+
+    const fmt = (x, d = 2) => {
+      if (x === null || x === undefined || x === '') return '';
+      const n = Number(x);
+      return Number.isFinite(n) ? n.toFixed(d) : x;
+    };
+
+    function card(label, value) {
+      return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function renderCards(data) {
+      const ok = data.filter(r => r.forecast_status === 'ok').length;
+      const skipped = data.filter(r => r.forecast_status === 'skipped').length;
+      const high = data.filter(r => r.confidence === 'high').length;
+      const med = data.filter(r => r.confidence === 'medium').length;
+      document.getElementById('cards').innerHTML = [
+        card('Total LIDs', data.length),
+        card('Forecast OK', ok),
+        card('High confidence', high),
+        card('Medium confidence', med),
+        card('Skipped / unavailable', skipped)
+      ].join('');
+    }
+
+    function filtered() {
+      const q = document.getElementById('search').value.toLowerCase();
+      const conf = document.getElementById('confidence').value;
+      const status = document.getElementById('status').value;
+      return forecasts.filter(r => {
+        const text = `${r.lid} ${r.name} ${r.run_label} ${r.forecast_status} ${r.forecast_note}`.toLowerCase();
+        return (!q || text.includes(q)) && (!conf || r.confidence === conf) && (!status || r.forecast_status === status);
+      }).sort((a, b) => {
+        const av = a[sortKey] ?? '';
+        const bv = b[sortKey] ?? '';
+        const an = Number(av), bn = Number(bv);
+        if (Number.isFinite(an) && Number.isFinite(bn)) return (an - bn) * sortDir;
+        return String(av).localeCompare(String(bv)) * sortDir;
+      });
+    }
+
+    function render() {
+      const data = filtered();
+      renderCards(data);
+      document.getElementById('rows').innerHTML = data.map(r => `
+        <tr>
+          <td class="left"><strong>${r.lid || ''}</strong></td>
+          <td class="left">${r.name || ''}</td>
+          <td>${fmt(r.current_stage_ft)}</td>
+          <td>${fmt(r.r1_ft_per_hr)}</td>
+          <td>${fmt(r.r3_ft_per_hr)}</td>
+          <td>${fmt(r.pred_remaining_rise_ft)}</td>
+          <td><strong>${fmt(r.pred_crest_likely_ft)}</strong></td>
+          <td>${fmt(r.pred_crest_conservative_ft)}</td>
+          <td>${fmt(r.pred_crest_high_end_ft)}</td>
+          <td class="left">${r.run_label || ''}</td>
+          <td class="left"><span class="pill ${r.confidence || 'none'}">${r.confidence || 'none'}</span></td>
+          <td>${fmt(r.model_event_count, 0)}</td>
+          <td>${fmt(r.model_mae_ft)}</td>
+          <td>${fmt(r.model_bias_ft)}</td>
+          <td class="left ${r.forecast_status || ''}">${r.forecast_status || ''}</td>
+          <td class="left">${r.forecast_note || ''}</td>
+        </tr>`).join('');
+    }
+
+    document.querySelectorAll('th[data-key]').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        if (sortKey === key) sortDir *= -1;
+        else { sortKey = key; sortDir = 1; }
+        render();
+      });
+    });
+    document.getElementById('search').addEventListener('input', render);
+    document.getElementById('confidence').addEventListener('change', render);
+    document.getElementById('status').addEventListener('change', render);
+
+    const payload = {
+  "generated_utc": "2026-06-08T10:25:14.828415+00:00",
+  "count": 32,
+  "forecasts": [
+    {
+      "lid": "DARL1",
+      "name": "Amite River at Darlington",
+      "usgs_site": "07377000",
+      "profile_event_set": "skip",
+      "run_label": "skip",
+      "profile_reason": "insufficient historical events even after custom threshold retest",
+      "forecast_status": "skipped",
+      "forecast_note": "insufficient historical events even after custom threshold retest",
+      "confidence": "none"
+    },
+    {
+      "lid": "MAGL1",
+      "name": "Amite River at Magnolia",
+      "usgs_site": "07377300",
+      "profile_event_set": "skip",
+      "run_label": "skip",
+      "profile_reason": "insufficient historical events even after custom threshold retest",
+      "forecast_status": "skipped",
+      "forecast_note": "insufficient historical events even after custom threshold retest",
+      "confidence": "none"
+    },
+    {
+      "lid": "DENL1",
+      "name": "Amite River at Denham Springs",
+      "usgs_site": "07378500",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "strong flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:15:00+00:00",
+      "generated_utc": "2026-06-08T10:24:54.621604+00:00",
+      "current_stage_ft": 17.555,
+      "h0_stage_ft": 11.72,
+      "elapsed_hr_since_rise_start": 29.0,
+      "r1_ft_per_hr": 0.025,
+      "r3_ft_per_hr": 0.042,
+      "r6_ft_per_hr": 0.091,
+      "r12_ft_per_hr": 0.205,
+      "event_start_threshold_used_ft": 26.0,
+      "model_mae_ft": 0.991,
+      "model_bias_ft": 0.121,
+      "model_event_count": 25.0,
+      "model_holdout_events": 7.0,
+      "model_r2": 0.797,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/DENL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "BYML1",
+      "name": "Amite River at Bayou Manchac",
+      "usgs_site": "",
+      "profile_event_set": "skip",
+      "run_label": "skip",
+      "profile_reason": "no USGS/raw mapping yet",
+      "forecast_status": "skipped",
+      "forecast_note": "no USGS/raw mapping yet",
+      "confidence": "none"
+    },
+    {
+      "lid": "PVLL1",
+      "name": "Amite River at Port Vincent",
+      "usgs_site": "07380120",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:15:00+00:00",
+      "generated_utc": "2026-06-08T10:24:55.507511+00:00",
+      "current_stage_ft": 3.3,
+      "h0_stage_ft": 3.3,
+      "elapsed_hr_since_rise_start": 7.75,
+      "r1_ft_per_hr": 0.0,
+      "r3_ft_per_hr": 0.0,
+      "r6_ft_per_hr": 0.0,
+      "r12_ft_per_hr": -0.004,
+      "event_start_threshold_used_ft": 7.0,
+      "model_mae_ft": 0.522,
+      "model_bias_ft": 0.077,
+      "model_event_count": 5.0,
+      "model_holdout_events": 0.0,
+      "model_r2": 0.845,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/PVLL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "OLVL1",
+      "name": "Comite River at Olive Branch",
+      "usgs_site": "07377500",
+      "profile_event_set": "skip",
+      "run_label": "skip",
+      "profile_reason": "insufficient historical events even after custom threshold retest",
+      "forecast_status": "skipped",
+      "forecast_note": "insufficient historical events even after custom threshold retest",
+      "confidence": "none"
+    },
+    {
+      "lid": "CMTL1",
+      "name": "Comite River at Joor Road",
+      "usgs_site": "07378000",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "moderate not selected yet; flood-plus baseline needs review for bias",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:15:00+00:00",
+      "generated_utc": "2026-06-08T10:24:56.254818+00:00",
+      "current_stage_ft": 4.005,
+      "h0_stage_ft": 0.92,
+      "elapsed_hr_since_rise_start": 35.25,
+      "r1_ft_per_hr": -0.235,
+      "r3_ft_per_hr": -0.272,
+      "r6_ft_per_hr": -0.264,
+      "r12_ft_per_hr": -0.185,
+      "event_start_threshold_used_ft": 16.0,
+      "model_mae_ft": 2.834,
+      "model_bias_ft": 2.826,
+      "model_event_count": 17.0,
+      "model_holdout_events": 5.0,
+      "model_r2": 0.691,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/CMTL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "LPOL1",
+      "name": "Tickfaw River at Liverpool",
+      "usgs_site": "07375800",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "flood-plus strong; moderate has too few events despite good score",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-05-25T10:15:00+00:00",
+      "generated_utc": "2026-06-08T10:24:57.044467+00:00",
+      "current_stage_ft": 2.375,
+      "h0_stage_ft": 2.375,
+      "elapsed_hr_since_rise_start": 0.0,
+      "r1_ft_per_hr": -0.025,
+      "r3_ft_per_hr": -0.018,
+      "r6_ft_per_hr": -0.017,
+      "r12_ft_per_hr": -0.016,
+      "event_start_threshold_used_ft": 9.0,
+      "model_mae_ft": 0.834,
+      "model_bias_ft": -0.272,
+      "model_event_count": 29.0,
+      "model_holdout_events": 8.0,
+      "model_r2": 0.893,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/LPOL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "MONL1",
+      "name": "Tickfaw River at Montpelier",
+      "usgs_site": "07375960",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:30:00+00:00",
+      "generated_utc": "2026-06-08T10:24:57.859315+00:00",
+      "current_stage_ft": 6.07,
+      "h0_stage_ft": 3.06,
+      "elapsed_hr_since_rise_start": 35.25,
+      "r1_ft_per_hr": -0.02,
+      "r3_ft_per_hr": -0.01,
+      "r6_ft_per_hr": 0.008,
+      "r12_ft_per_hr": 0.049,
+      "event_start_threshold_used_ft": 12.0,
+      "model_mae_ft": 1.479,
+      "model_bias_ft": 0.238,
+      "model_event_count": 14.0,
+      "model_holdout_events": 4.0,
+      "model_r2": 0.687,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/MONL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "HOLL1",
+      "name": "Tickfaw River at Holden",
+      "usgs_site": "07376000",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline",
+      "forecast_status": "ok",
+      "forecast_note": "early rise: stage/rate criteria met",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:24:58.688435+00:00",
+      "current_stage_ft": 3.255,
+      "h0_stage_ft": 1.63,
+      "elapsed_hr_since_rise_start": 14.5,
+      "r1_ft_per_hr": 0.225,
+      "r3_ft_per_hr": 0.252,
+      "r6_ft_per_hr": 0.216,
+      "r12_ft_per_hr": 0.13,
+      "event_start_threshold_used_ft": 14.0,
+      "model_mae_ft": 0.942,
+      "model_bias_ft": 0.053,
+      "model_event_count": 11.0,
+      "model_holdout_events": 3.0,
+      "model_r2": 0.765,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/HOLL1_flood_plus_ridge_model.joblib",
+      "pred_remaining_rise_ft": 14.449,
+      "pred_crest_likely_ft": 17.704,
+      "pred_crest_conservative_ft": 18.463,
+      "pred_crest_high_end_ft": 19.116,
+      "confidence": "high"
+    },
+    {
+      "lid": "NRBL1",
+      "name": "Natalbany River at Baptist",
+      "usgs_site": "07376500",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:00:00+00:00",
+      "generated_utc": "2026-06-08T10:24:59.391640+00:00",
+      "current_stage_ft": 5.315,
+      "h0_stage_ft": 4.35,
+      "elapsed_hr_since_rise_start": 43.75,
+      "r1_ft_per_hr": -0.065,
+      "r3_ft_per_hr": -0.072,
+      "r6_ft_per_hr": -0.058,
+      "r12_ft_per_hr": -0.007,
+      "event_start_threshold_used_ft": 15.0,
+      "model_mae_ft": 1.525,
+      "model_bias_ft": 0.071,
+      "model_event_count": 5.0,
+      "model_holdout_events": 0.0,
+      "model_r2": 0.903,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/NRBL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "OSYM6",
+      "name": "Tangipahoa River at Osyka",
+      "usgs_site": "07375280",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "strong flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T10:00:00+00:00",
+      "generated_utc": "2026-06-08T10:25:00.250159+00:00",
+      "current_stage_ft": 8.54,
+      "h0_stage_ft": 8.28,
+      "elapsed_hr_since_rise_start": 43.25,
+      "r1_ft_per_hr": -0.01,
+      "r3_ft_per_hr": -0.007,
+      "r6_ft_per_hr": 0.002,
+      "r12_ft_per_hr": 0.003,
+      "event_start_threshold_used_ft": 14.0,
+      "model_mae_ft": 0.651,
+      "model_bias_ft": 0.334,
+      "model_event_count": 23.0,
+      "model_holdout_events": 6.0,
+      "model_r2": 0.914,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/OSYM6_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "KENL1",
+      "name": "Tangipahoa River at Kentwood",
+      "usgs_site": "07375300",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:00:00+00:00",
+      "generated_utc": "2026-06-08T10:25:01.088979+00:00",
+      "current_stage_ft": 2.485,
+      "h0_stage_ft": 1.85,
+      "elapsed_hr_since_rise_start": 45.0,
+      "r1_ft_per_hr": -0.005,
+      "r3_ft_per_hr": -0.008,
+      "r6_ft_per_hr": -0.016,
+      "r12_ft_per_hr": -0.027,
+      "event_start_threshold_used_ft": 12.0,
+      "model_mae_ft": 0.717,
+      "model_bias_ft": 0.025,
+      "model_event_count": 6.0,
+      "model_holdout_events": 0.0,
+      "model_r2": 0.961,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/KENL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "AMIL1",
+      "name": "Tangipahoa River at Amite",
+      "usgs_site": "07375430",
+      "profile_event_set": "custom",
+      "run_label": "custom_18ft_plus",
+      "profile_reason": "too few flood-plus events; use action/custom threshold training",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T10:00:00+00:00",
+      "generated_utc": "2026-06-08T10:25:01.843471+00:00",
+      "current_stage_ft": 6.175,
+      "h0_stage_ft": 5.31,
+      "elapsed_hr_since_rise_start": 48.0,
+      "r1_ft_per_hr": -0.045,
+      "r3_ft_per_hr": -0.058,
+      "r6_ft_per_hr": -0.064,
+      "r12_ft_per_hr": -0.063,
+      "event_start_threshold_used_ft": 18.0,
+      "model_mae_ft": 2.382,
+      "model_bias_ft": 0.236,
+      "model_event_count": 5.0,
+      "model_holdout_events": 0.0,
+      "model_r2": 0.853,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/AMIL1_custom_18ft_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "ROBL1",
+      "name": "Tangipahoa River at Robert",
+      "usgs_site": "07375500",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "moderate-plus performed worse; use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:02.455184+00:00",
+      "current_stage_ft": 10.705,
+      "h0_stage_ft": 7.76,
+      "elapsed_hr_since_rise_start": 42.25,
+      "r1_ft_per_hr": -0.025,
+      "r3_ft_per_hr": -0.018,
+      "r6_ft_per_hr": -0.004,
+      "r12_ft_per_hr": 0.041,
+      "event_start_threshold_used_ft": 13.0,
+      "model_mae_ft": 0.747,
+      "model_bias_ft": -0.045,
+      "model_event_count": 72.0,
+      "model_holdout_events": 18.0,
+      "model_r2": 0.728,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/ROBL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "FLSL1",
+      "name": "Tchefuncte River near Folsom",
+      "usgs_site": "07375000",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "moderate-plus performed worse; use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:00:00+00:00",
+      "generated_utc": "2026-06-08T10:25:03.153703+00:00",
+      "current_stage_ft": 9.505,
+      "h0_stage_ft": 5.5,
+      "elapsed_hr_since_rise_start": 44.25,
+      "r1_ft_per_hr": 0.035,
+      "r3_ft_per_hr": 0.042,
+      "r6_ft_per_hr": 0.051,
+      "r12_ft_per_hr": 0.067,
+      "event_start_threshold_used_ft": 15.0,
+      "model_mae_ft": 2.113,
+      "model_bias_ft": 1.974,
+      "model_event_count": 20.0,
+      "model_holdout_events": 5.0,
+      "model_r2": 0.766,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/FLSL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "CUSL1",
+      "name": "Tchefuncte River near Covington / Hwy 190",
+      "usgs_site": "07375050",
+      "profile_event_set": "moderate",
+      "run_label": "moderate_plus",
+      "profile_reason": "moderate-plus improved versus flood-plus",
+      "forecast_status": "ok",
+      "forecast_note": "early rise: stage/rate criteria met",
+      "forecast_time_utc": "2026-06-08T09:30:00+00:00",
+      "generated_utc": "2026-06-08T10:25:04.043197+00:00",
+      "current_stage_ft": 13.495,
+      "h0_stage_ft": 10.52,
+      "elapsed_hr_since_rise_start": 39.75,
+      "r1_ft_per_hr": 0.065,
+      "r3_ft_per_hr": 0.072,
+      "r6_ft_per_hr": 0.073,
+      "r12_ft_per_hr": 0.073,
+      "event_start_threshold_used_ft": 18.0,
+      "model_mae_ft": 1.014,
+      "model_bias_ft": 0.501,
+      "model_event_count": 12.0,
+      "model_holdout_events": 3.0,
+      "model_r2": 0.808,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/CUSL1_moderate_plus_ridge_model.joblib",
+      "pred_remaining_rise_ft": 13.268,
+      "pred_crest_likely_ft": 26.763,
+      "pred_crest_conservative_ft": 26.763,
+      "pred_crest_high_end_ft": 28.722,
+      "confidence": "medium"
+    },
+    {
+      "lid": "CGSL1",
+      "name": "Bogue Falaya River at Camp Covington",
+      "usgs_site": "07375105",
+      "profile_event_set": "moderate",
+      "run_label": "moderate_plus",
+      "profile_reason": "moderate-plus improved but still needs review",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:00:00+00:00",
+      "generated_utc": "2026-06-08T10:25:04.824031+00:00",
+      "current_stage_ft": 35.915,
+      "h0_stage_ft": 34.87,
+      "elapsed_hr_since_rise_start": 46.0,
+      "r1_ft_per_hr": -0.035,
+      "r3_ft_per_hr": -0.042,
+      "r6_ft_per_hr": -0.048,
+      "r12_ft_per_hr": -0.061,
+      "event_start_threshold_used_ft": 40.0,
+      "model_mae_ft": 2.199,
+      "model_bias_ft": 1.03,
+      "model_event_count": 14.0,
+      "model_holdout_events": 4.0,
+      "model_r2": 0.82,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/CGSL1_moderate_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "CVEL1",
+      "name": "Bogue Falaya River at Boston Street Covington",
+      "usgs_site": "07375175",
+      "profile_event_set": "moderate",
+      "run_label": "moderate_plus",
+      "profile_reason": "moderate-plus improved versus flood-plus",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:30:00+00:00",
+      "generated_utc": "2026-06-08T10:25:05.522230+00:00",
+      "current_stage_ft": 2.605,
+      "h0_stage_ft": 2.605,
+      "elapsed_hr_since_rise_start": 0.0,
+      "r1_ft_per_hr": -0.035,
+      "r3_ft_per_hr": -0.028,
+      "r6_ft_per_hr": -0.034,
+      "r12_ft_per_hr": -0.021,
+      "event_start_threshold_used_ft": 5.0,
+      "model_mae_ft": 1.258,
+      "model_bias_ft": 0.593,
+      "model_event_count": 12.0,
+      "model_holdout_events": 3.0,
+      "model_r2": 0.876,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/CVEL1_moderate_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "TYTM6",
+      "name": "Bogue Chitto River at Tylertown",
+      "usgs_site": "02490500",
+      "profile_event_set": "moderate",
+      "run_label": "moderate_plus",
+      "profile_reason": "moderate-plus improved versus flood-plus",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:06.380992+00:00",
+      "current_stage_ft": 6.095,
+      "h0_stage_ft": 5.85,
+      "elapsed_hr_since_rise_start": 20.25,
+      "r1_ft_per_hr": -0.035,
+      "r3_ft_per_hr": -0.035,
+      "r6_ft_per_hr": -0.026,
+      "r12_ft_per_hr": -0.001,
+      "event_start_threshold_used_ft": 14.0,
+      "model_mae_ft": 2.154,
+      "model_bias_ft": 0.921,
+      "model_event_count": 19.0,
+      "model_holdout_events": 5.0,
+      "model_r2": 0.779,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/TYTM6_moderate_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "FRNL1",
+      "name": "Bogue Chitto River at Franklinton",
+      "usgs_site": "02491500",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "moderate-plus too sparse; use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:15:00+00:00",
+      "generated_utc": "2026-06-08T10:25:06.993706+00:00",
+      "current_stage_ft": 1.56,
+      "h0_stage_ft": 1.37,
+      "elapsed_hr_since_rise_start": 41.5,
+      "r1_ft_per_hr": -0.02,
+      "r3_ft_per_hr": -0.017,
+      "r6_ft_per_hr": -0.017,
+      "r12_ft_per_hr": -0.022,
+      "event_start_threshold_used_ft": 10.0,
+      "model_mae_ft": 1.992,
+      "model_bias_ft": 0.305,
+      "model_event_count": 21.0,
+      "model_holdout_events": 6.0,
+      "model_r2": 0.793,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/FRNL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "BSHL1",
+      "name": "Bogue Chitto River at Bush",
+      "usgs_site": "02492000",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:15:00+00:00",
+      "generated_utc": "2026-06-08T10:25:07.596775+00:00",
+      "current_stage_ft": 6.665,
+      "h0_stage_ft": 5.08,
+      "elapsed_hr_since_rise_start": 40.0,
+      "r1_ft_per_hr": -0.025,
+      "r3_ft_per_hr": -0.022,
+      "r6_ft_per_hr": -0.011,
+      "r12_ft_per_hr": 0.015,
+      "event_start_threshold_used_ft": 9.0,
+      "model_mae_ft": 1.286,
+      "model_bias_ft": -0.13,
+      "model_event_count": 48.0,
+      "model_holdout_events": 12.0,
+      "model_r2": 0.479,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/BSHL1_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "BXAL1",
+      "name": "Pearl River at Bogalusa",
+      "usgs_site": "02489500",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "solid flood-plus baseline",
+      "forecast_status": "ok",
+      "forecast_note": "current stage at/above event-start threshold",
+      "forecast_time_utc": "2026-05-29T13:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:08.108746+00:00",
+      "current_stage_ft": 16.327,
+      "h0_stage_ft": 15.78,
+      "elapsed_hr_since_rise_start": 24.75,
+      "r1_ft_per_hr": 0.017,
+      "r3_ft_per_hr": 0.014,
+      "r6_ft_per_hr": 0.014,
+      "r12_ft_per_hr": 0.023,
+      "event_start_threshold_used_ft": 16.0,
+      "model_mae_ft": 0.635,
+      "model_bias_ft": -0.005,
+      "model_event_count": 18.0,
+      "model_holdout_events": 5.0,
+      "model_r2": 0.698,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/BXAL1_flood_plus_ridge_model.joblib",
+      "pred_remaining_rise_ft": 1.697,
+      "pred_crest_likely_ft": 18.023,
+      "pred_crest_conservative_ft": 18.11,
+      "pred_crest_high_end_ft": 18.448,
+      "confidence": "high"
+    },
+    {
+      "lid": "PERL1",
+      "name": "Pearl River near Pearl River",
+      "usgs_site": "02492600",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "flood-plus baseline selected despite good sparse moderate score",
+      "forecast_status": "ok",
+      "forecast_note": "current stage at/above event-start threshold",
+      "forecast_time_utc": "2026-06-08T10:00:00+00:00",
+      "generated_utc": "2026-06-08T10:25:08.941286+00:00",
+      "current_stage_ft": 12.13,
+      "h0_stage_ft": 11.42,
+      "elapsed_hr_since_rise_start": 40.5,
+      "r1_ft_per_hr": 0.01,
+      "r3_ft_per_hr": 0.013,
+      "r6_ft_per_hr": 0.013,
+      "r12_ft_per_hr": 0.017,
+      "event_start_threshold_used_ft": 12.0,
+      "model_mae_ft": 0.221,
+      "model_bias_ft": 0.156,
+      "model_event_count": 15.0,
+      "model_holdout_events": 4.0,
+      "model_r2": 0.774,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/PERL1_flood_plus_ridge_model.joblib",
+      "pred_remaining_rise_ft": 0.472,
+      "pred_crest_likely_ft": 12.602,
+      "pred_crest_conservative_ft": 12.602,
+      "pred_crest_high_end_ft": 12.725,
+      "confidence": "high"
+    },
+    {
+      "lid": "MNLM6",
+      "name": "West Hobolochitto Creek near McNeil",
+      "usgs_site": "02492360",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "moderate underforecasted; use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:09.804708+00:00",
+      "current_stage_ft": 10.54,
+      "h0_stage_ft": 7.91,
+      "elapsed_hr_since_rise_start": 40.5,
+      "r1_ft_per_hr": -0.07,
+      "r3_ft_per_hr": -0.077,
+      "r6_ft_per_hr": -0.097,
+      "r12_ft_per_hr": -0.149,
+      "event_start_threshold_used_ft": 12.0,
+      "model_mae_ft": 1.511,
+      "model_bias_ft": -0.532,
+      "model_event_count": 61.0,
+      "model_holdout_events": 16.0,
+      "model_r2": 0.779,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/MNLM6_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "CREM6",
+      "name": "East Hobolochitto Creek near Caesar",
+      "usgs_site": "02492343",
+      "profile_event_set": "moderate",
+      "run_label": "moderate_plus",
+      "profile_reason": "strong moderate-plus model",
+      "forecast_status": "ok",
+      "forecast_note": "current stage at/above event-start threshold",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:10.646746+00:00",
+      "current_stage_ft": 12.54,
+      "h0_stage_ft": 6.06,
+      "elapsed_hr_since_rise_start": 43.75,
+      "r1_ft_per_hr": -0.11,
+      "r3_ft_per_hr": -0.11,
+      "r6_ft_per_hr": -0.088,
+      "r12_ft_per_hr": -0.061,
+      "event_start_threshold_used_ft": 12.0,
+      "model_mae_ft": 0.665,
+      "model_bias_ft": 0.601,
+      "model_event_count": 15.0,
+      "model_holdout_events": 4.0,
+      "model_r2": 0.967,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/CREM6_moderate_plus_ridge_model.joblib",
+      "pred_remaining_rise_ft": 3.672,
+      "pred_crest_likely_ft": 16.212,
+      "pred_crest_conservative_ft": 16.212,
+      "pred_crest_high_end_ft": 17.471,
+      "confidence": "high"
+    },
+    {
+      "lid": "KLNM6",
+      "name": "Jourdan River at Kiln / Bay St. Louis",
+      "usgs_site": "02481660",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "flood-plus baseline but likely mixed/tidal/backwater review needed",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:11.455280+00:00",
+      "current_stage_ft": 3.17,
+      "h0_stage_ft": 2.03,
+      "elapsed_hr_since_rise_start": 47.0,
+      "r1_ft_per_hr": -0.09,
+      "r3_ft_per_hr": -0.14,
+      "r6_ft_per_hr": -0.145,
+      "r12_ft_per_hr": -0.054,
+      "event_start_threshold_used_ft": 5.0,
+      "model_mae_ft": 2.031,
+      "model_bias_ft": -1.909,
+      "model_event_count": 11.0,
+      "model_holdout_events": 3.0,
+      "model_r2": -0.238,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/KLNM6_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "GLFM6",
+      "name": "Wolf River near Gulfport",
+      "usgs_site": "02481521",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "strong flood-plus baseline",
+      "forecast_status": "ok",
+      "forecast_note": "current stage at/above event-start threshold",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:11.985314+00:00",
+      "current_stage_ft": 9.08,
+      "h0_stage_ft": 3.78,
+      "elapsed_hr_since_rise_start": 46.0,
+      "r1_ft_per_hr": -0.07,
+      "r3_ft_per_hr": -0.067,
+      "r6_ft_per_hr": -0.062,
+      "r12_ft_per_hr": -0.056,
+      "event_start_threshold_used_ft": 7.0,
+      "model_mae_ft": 0.504,
+      "model_bias_ft": 0.114,
+      "model_event_count": 27.0,
+      "model_holdout_events": 7.0,
+      "model_r2": 0.887,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/GLFM6_flood_plus_ridge_model.joblib",
+      "pred_remaining_rise_ft": 0.155,
+      "pred_crest_likely_ft": 9.235,
+      "pred_crest_conservative_ft": 9.408,
+      "pred_crest_high_end_ft": 10.696,
+      "confidence": "high"
+    },
+    {
+      "lid": "LYMM6",
+      "name": "Biloxi River near Lyman",
+      "usgs_site": "02481130",
+      "profile_event_set": "moderate",
+      "run_label": "moderate_plus",
+      "profile_reason": "moderate-plus improved versus flood-plus",
+      "forecast_status": "ok",
+      "forecast_note": "current stage at/above event-start threshold",
+      "forecast_time_utc": "2026-06-08T09:30:00+00:00",
+      "generated_utc": "2026-06-08T10:25:12.531992+00:00",
+      "current_stage_ft": 17.385,
+      "h0_stage_ft": 6.58,
+      "elapsed_hr_since_rise_start": 48.0,
+      "r1_ft_per_hr": -0.105,
+      "r3_ft_per_hr": -0.105,
+      "r6_ft_per_hr": -0.103,
+      "r12_ft_per_hr": -0.086,
+      "event_start_threshold_used_ft": 10.0,
+      "model_mae_ft": 0.878,
+      "model_bias_ft": -0.065,
+      "model_event_count": 26.0,
+      "model_holdout_events": 7.0,
+      "model_r2": 0.916,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/LYMM6_moderate_plus_ridge_model.joblib",
+      "pred_remaining_rise_ft": 0.406,
+      "pred_crest_likely_ft": 17.791,
+      "pred_crest_conservative_ft": 18.267,
+      "pred_crest_high_end_ft": 19.579,
+      "confidence": "high"
+    },
+    {
+      "lid": "DIBM6",
+      "name": "Tchoutacabouffa River near D\u2019Iberville",
+      "usgs_site": "02480590",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline; needs review",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:30:00+00:00",
+      "generated_utc": "2026-06-08T10:25:13.197413+00:00",
+      "current_stage_ft": 4.66,
+      "h0_stage_ft": 2.39,
+      "elapsed_hr_since_rise_start": 48.0,
+      "r1_ft_per_hr": -0.08,
+      "r3_ft_per_hr": -0.113,
+      "r6_ft_per_hr": -0.107,
+      "r12_ft_per_hr": -0.063,
+      "event_start_threshold_used_ft": 8.0,
+      "model_mae_ft": 2.174,
+      "model_bias_ft": 1.066,
+      "model_event_count": 19.0,
+      "model_holdout_events": 5.0,
+      "model_r2": 0.543,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/DIBM6_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "PGFM6",
+      "name": "Pascagoula River at Graham Ferry",
+      "usgs_site": "02479310",
+      "profile_event_set": "flood",
+      "run_label": "flood_plus",
+      "profile_reason": "use flood-plus baseline",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:45:00+00:00",
+      "generated_utc": "2026-06-08T10:25:14.052406+00:00",
+      "current_stage_ft": 12.79,
+      "h0_stage_ft": 12.79,
+      "elapsed_hr_since_rise_start": 1.25,
+      "r1_ft_per_hr": 0.0,
+      "r3_ft_per_hr": -0.007,
+      "r6_ft_per_hr": -0.008,
+      "r12_ft_per_hr": -0.009,
+      "event_start_threshold_used_ft": 15.0,
+      "model_mae_ft": 0.139,
+      "model_bias_ft": 0.051,
+      "model_event_count": 10.0,
+      "model_holdout_events": 3.0,
+      "model_r2": 0.806,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/PGFM6_flood_plus_ridge_model.joblib",
+      "confidence": "none"
+    },
+    {
+      "lid": "ORAM6",
+      "name": "Escatawpa River near Orange Grove",
+      "usgs_site": "0248018020",
+      "profile_event_set": "custom",
+      "run_label": "custom_6ft_plus",
+      "profile_reason": "too few flood-plus events; use action-stage-plus training",
+      "forecast_status": "inactive",
+      "forecast_note": "inactive: below threshold and not rising enough",
+      "forecast_time_utc": "2026-06-08T09:30:00+00:00",
+      "generated_utc": "2026-06-08T10:25:14.823031+00:00",
+      "current_stage_ft": 2.74,
+      "h0_stage_ft": 2.74,
+      "elapsed_hr_since_rise_start": 0.25,
+      "r1_ft_per_hr": -0.04,
+      "r3_ft_per_hr": -0.043,
+      "r6_ft_per_hr": -0.045,
+      "r12_ft_per_hr": -0.022,
+      "event_start_threshold_used_ft": 6.0,
+      "model_mae_ft": 1.183,
+      "model_bias_ft": -0.233,
+      "model_event_count": 7.0,
+      "model_holdout_events": 2.0,
+      "model_r2": 0.219,
+      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/ORAM6_custom_6ft_plus_ridge_model.joblib",
+      "confidence": "none"
+    }
+  ]
+};
+    forecasts = payload.forecasts || [];
+    document.getElementById('generated').textContent = `Generated UTC: ${payload.generated_utc || 'unknown'} · ${forecasts.length} LIDs`;
+    render();
+  </script>
+</body>
+</html>
