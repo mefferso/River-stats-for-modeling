@@ -115,6 +115,7 @@ jobs:
           train = ['python', 'src/crest_eventset_train.py', 'train', '--sites', active_sites, '--event-set', event_set] + crest_arg
           profile_train = ['python', 'src/train_model_profiles.py', '--sites', active_sites, '--lids', selected_lids]
           forecast = ['python', 'src/forecast_profiles.py', '--sites', active_sites, '--lids', selected_lids]
+          dashboard = ['python', 'src/build_standalone_dashboard.py']
           status = ['python', 'src/model_status.py', '--sites', active_sites]
 
           def prepare_sites():
@@ -159,6 +160,7 @@ jobs:
               run(download)
               run(profile_train)
               run(forecast)
+              run(dashboard)
               run(status)
           elif mode == 'profile-train':
               if active_sites != discovered:
@@ -171,6 +173,7 @@ jobs:
           elif mode == 'forecast-only':
               site_file = active_sites if os.path.exists(active_sites) else (discovered if os.path.exists(discovered) else 'config/sites.csv')
               run(['python', 'src/forecast_profiles.py', '--sites', site_file, '--lids', selected_lids])
+              run(dashboard)
           elif mode == 'status':
               site_file = active_sites if os.path.exists(active_sites) else (discovered if os.path.exists(discovered) else 'config/sites.csv')
               run(['python', 'src/model_status.py', '--sites', site_file])
