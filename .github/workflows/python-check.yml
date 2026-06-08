@@ -30,6 +30,7 @@ jobs:
           python -m py_compile src/filter_sites.py
           python -m py_compile src/model_status.py
           python -m py_compile src/train_model_profiles.py
+          python -m py_compile src/forecast_profiles.py
 
       - name: Show CLI help
         run: |
@@ -38,3 +39,4 @@ jobs:
           python src/filter_sites.py --help
           python src/model_status.py --help
           python src/train_model_profiles.py --help
+          python src/forecast_profiles.py --help
