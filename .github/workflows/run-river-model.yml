@@ -104,13 +104,14 @@ jobs:
           thresholds = ['python', 'src/crest_eventset_train.py', 'discover-thresholds', '--sites', 'config/sites_with_usgs.csv', '--output', 'config/sites_with_usgs.csv']
           download = ['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', years] + force_arg
           train = ['python', 'src/crest_eventset_train.py', 'train', '--sites', 'config/sites_with_usgs.csv', '--event-set', event_set] + crest_arg
+          status = ['python', 'src/model_status.py', '--sites', 'config/sites_with_usgs.csv']
 
           if mode == 'smoke':
               run(discover)
               run(thresholds)
               run(with_limit(['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', 1] + force_arg))
               run(with_limit(train))
-              run(['python', 'src/nwps_multigage_model.py', 'status', '--sites', 'config/sites_with_usgs.csv'])
+              run(status)
           elif mode == 'discover':
               run(discover)
           elif mode == 'thresholds':
@@ -120,19 +121,22 @@ jobs:
               run(discover)
               run(thresholds)
               run(with_limit(download))
+              run(status)
           elif mode == 'train':
               run(discover)
               run(thresholds)
               run(with_limit(download))
               run(with_limit(train))
+              run(status)
           elif mode == 'run-all':
               run(discover)
               run(thresholds)
               run(with_limit(download))
               run(with_limit(train))
+              run(status)
           elif mode == 'status':
               site_file = 'config/sites_with_usgs.csv' if os.path.exists('config/sites_with_usgs.csv') else 'config/sites.csv'
-              run(['python', 'src/nwps_multigage_model.py', 'status', '--sites', site_file])
+              run(['python', 'src/model_status.py', '--sites', site_file])
           else:
               raise SystemExit(f'Unknown mode: {mode}')
           PY
