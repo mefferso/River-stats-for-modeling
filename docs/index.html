@@ -23,15 +23,16 @@
     h1 { margin: 0 0 6px; font-size: 1.35rem; }
     .sub { color: var(--muted); font-size: 0.88rem; }
     main { padding: 14px 24px 28px; }
-    .manual-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .manual-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; max-width: 980px; }
     .manual-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
     .manual-title h2 { margin: 0; font-size: 1.02rem; }
     .manual-title span { color: var(--muted); font-size: 0.82rem; }
-    .manual-grid { display: grid; grid-template-columns: 220px repeat(3, 120px) auto; gap: 10px; align-items: end; }
-    .manual-advanced { display: grid; grid-template-columns: repeat(4, 120px); gap: 10px; margin-top: 10px; }
+    .manual-grid { display: grid; grid-template-columns: minmax(280px, 360px) 130px 130px 130px 118px; gap: 10px; align-items: end; }
+    .manual-advanced { display: grid; grid-template-columns: repeat(4, 130px); gap: 10px; margin-top: 10px; }
     label { display: block; color: var(--muted); font-size: 0.75rem; margin-bottom: 4px; }
-    input, select, button { background: #0b1220; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; font-size: 0.86rem; }
-    button { cursor: pointer; background: #123044; border-color: #245b7a; font-weight: 700; }
+    input, select, button { background: #0b1220; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; font-size: 0.86rem; height: 36px; }
+    input, select { width: 100%; }
+    button { cursor: pointer; background: #123044; border-color: #245b7a; font-weight: 700; width: 118px; }
     button:hover { background: #16445f; }
     .manual-output { margin-top: 10px; padding: 10px; background: #0b1220; border: 1px solid var(--line); border-radius: 10px; min-height: 42px; color: var(--text); }
     .manual-output strong { color: #bfdbfe; }
@@ -39,7 +40,8 @@
     details { margin-top: 8px; }
     summary { cursor: pointer; color: #bfdbfe; font-size: 0.82rem; }
     .controls { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
-    .controls input { min-width: 230px; }
+    .controls input { min-width: 230px; max-width: 340px; }
+    .controls select { width: auto; min-width: 150px; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
     table { border-collapse: collapse; min-width: 1350px; width: 100%; }
     th, td { padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; font-size: 0.84rem; }
@@ -56,9 +58,11 @@
     .skipped, .missing_model, .missing_raw, .empty_raw { color: #fca5a5; }
     footer { color: var(--muted); font-size: 0.76rem; margin-top: 12px; line-height: 1.45; }
     a { color: var(--accent); }
-    @media (max-width: 900px) {
+    @media (max-width: 1000px) {
+      .manual-panel { max-width: none; }
       .manual-grid { grid-template-columns: 1fr 1fr; }
       .manual-advanced { grid-template-columns: 1fr 1fr; }
+      button { width: 118px; }
     }
   </style>
 </head>
@@ -76,7 +80,7 @@
       <div class="manual-grid">
         <div>
           <label for="manualLid">Forecast point / model</label>
-          <select id="manualLid"></select>
+          <select id="manualLid"><option>Loading…</option></select>
         </div>
         <div>
           <label for="manualStage">Current stage (ft)</label>
@@ -114,7 +118,7 @@
         </div>
       </details>
       <div class="manual-output" id="manualOutput">Choose a point and enter values.</div>
-      <div class="hint">Manual mode uses the trained equation directly. If H0/elapsed/6h/12h are blank, the page uses simple defaults, so the cleanest operational input is still from the automated latest-data forecast.</div>
+      <div class="hint">Manual mode uses trained equation coefficients embedded in latest_forecasts.json. If a point says no manual equation, rerun profile-forecast so the JSON includes model coefficients.</div>
     </section>
 
     <section class="controls">
@@ -186,17 +190,46 @@
     };
     const getForecast = (lid) => forecasts.find(r => r.lid === lid) || {};
 
+    function ensureManualFallback() {
+      const hasManual = Object.keys(manualModels || {}).length > 0;
+      if (hasManual) return;
+      manualModels = {};
+      forecasts.forEach(r => {
+        manualModels[r.lid] = {
+          lid: r.lid,
+          name: r.name || '',
+          run_label: r.run_label || 'no model',
+          status: r.forecast_status || 'missing_equation',
+          profile_reason: r.profile_reason || '',
+          skill: {
+            mae_ft: r.model_mae_ft,
+            bias_ft: r.model_bias_ft,
+            event_count: r.model_event_count,
+            holdout_events: r.model_holdout_events,
+            r2: r.model_r2
+          },
+          overrides: {}
+        };
+      });
+    }
+
     function populateManualChoices() {
+      ensureManualFallback();
       const sel = document.getElementById('manualLid');
       const lids = Object.keys(manualModels).sort();
+      if (!lids.length) {
+        sel.innerHTML = '<option>No forecast points found</option>';
+        document.getElementById('manualOutput').textContent = 'No forecast points found in latest_forecasts.json.';
+        return;
+      }
       sel.innerHTML = lids.map(lid => {
         const m = manualModels[lid] || {};
-        const label = `${lid} — ${m.name || ''} (${m.run_label || 'no model'})`;
-        const disabled = !m.equation || m.status !== 'ok';
-        return `<option value="${lid}" ${disabled ? 'disabled' : ''}>${label}${disabled ? ' — unavailable' : ''}</option>`;
+        const hasEq = !!m.equation;
+        const label = `${lid} — ${m.name || ''} (${m.run_label || 'no model'})${hasEq ? '' : ' — no manual equation'}`;
+        return `<option value="${lid}">${label}</option>`;
       }).join('');
-      const first = lids.find(lid => manualModels[lid]?.equation && manualModels[lid]?.status === 'ok');
-      if (first) sel.value = first;
+      const first = lids.find(lid => manualModels[lid]?.equation) || lids[0];
+      sel.value = first;
       prefillManualFromLatest();
     }
 
@@ -206,14 +239,18 @@
       if (r.current_stage_ft !== undefined && r.current_stage_ft !== '') document.getElementById('manualStage').value = r.current_stage_ft;
       if (r.r1_ft_per_hr !== undefined && r.r1_ft_per_hr !== '') document.getElementById('manualR1').value = r.r1_ft_per_hr;
       if (r.r3_ft_per_hr !== undefined && r.r3_ft_per_hr !== '') document.getElementById('manualR3').value = r.r3_ft_per_hr;
-      document.getElementById('manualOutput').textContent = 'Current latest values filled. Edit inputs and calculate.';
+      if (manualModels[lid]?.equation) {
+        document.getElementById('manualOutput').textContent = 'Latest values filled. Edit inputs and calculate.';
+      } else {
+        document.getElementById('manualOutput').textContent = 'Dropdown loaded, but this JSON has no manual equation for that point. Rerun profile-forecast after the latest patch.';
+      }
     }
 
     function manualCalc() {
       const lid = document.getElementById('manualLid').value;
       const m = manualModels[lid];
       const out = document.getElementById('manualOutput');
-      if (!m || !m.equation) { out.textContent = 'No trained model equation available for that point.'; return; }
+      if (!m || !m.equation) { out.textContent = 'No trained model equation available for that point. Rerun profile-forecast so latest_forecasts.json includes manual_models.'; return; }
 
       const stage = num('manualStage');
       const r1 = num('manualR1');
