@@ -1,0 +1,112 @@
+name: Run river model
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What to run
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - discover
+          - download
+          - train
+          - run-all
+          - status
+      years:
+        description: Years of USGS data for download/run-all
+        required: true
+        default: '15'
+      limit:
+        description: Only first N sites; 0 means all sites
+        required: true
+        default: '1'
+      force_download:
+        description: Re-download even if raw CSV exists in the runner
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run selected mode
+        env:
+          MODE: ${{ inputs.mode }}
+          YEARS: ${{ inputs.years }}
+          LIMIT: ${{ inputs.limit }}
+          FORCE_DOWNLOAD: ${{ inputs.force_download }}
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+
+          mode = os.environ['MODE']
+          years = int(os.environ['YEARS'])
+          limit = int(os.environ['LIMIT'])
+          force = os.environ['FORCE_DOWNLOAD'].lower() == 'true'
+
+          if years < 1 or years > 30:
+              raise SystemExit('years must be between 1 and 30')
+          if limit < 0 or limit > 100:
+              raise SystemExit('limit must be between 0 and 100')
+
+          def run(cmd):
+              print('RUN:', ' '.join(str(x) for x in cmd), flush=True)
+              subprocess.run([str(x) for x in cmd], check=True)
+
+          def with_limit(cmd):
+              if limit:
+                  return cmd + ['--limit', limit]
+              return cmd
+
+          force_arg = ['--force'] if force else ['--skip-existing']
+
+          if mode == 'smoke':
+              run(['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', 'config/sites_with_usgs.csv'])
+              run(with_limit(['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', 1] + force_arg))
+              run(with_limit(['python', 'src/nwps_multigage_model.py', 'train', '--sites', 'config/sites_with_usgs.csv']))
+              run(['python', 'src/nwps_multigage_model.py', 'status', '--sites', 'config/sites_with_usgs.csv'])
+          elif mode == 'discover':
+              run(['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', 'config/sites_with_usgs.csv'])
+          elif mode == 'download':
+              run(with_limit(['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', years] + force_arg))
+          elif mode == 'train':
+              run(with_limit(['python', 'src/nwps_multigage_model.py', 'train', '--sites', 'config/sites_with_usgs.csv']))
+          elif mode == 'run-all':
+              run(with_limit(['python', 'src/nwps_multigage_model.py', 'run-all', '--sites', 'config/sites.csv', '--years', years] + force_arg))
+          elif mode == 'status':
+              site_file = 'config/sites_with_usgs.csv' if os.path.exists('config/sites_with_usgs.csv') else 'config/sites.csv'
+              run(['python', 'src/nwps_multigage_model.py', 'status', '--sites', site_file])
+          else:
+              raise SystemExit(f'Unknown mode: {mode}')
+          PY
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: river-model-output
+          path: |
+            config/sites_with_usgs.csv
+            data/processed/
+            output/
+          if-no-files-found: ignore
+          retention-days: 14
