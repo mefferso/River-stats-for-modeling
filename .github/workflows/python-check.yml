@@ -31,6 +31,7 @@ jobs:
           python -m py_compile src/model_status.py
           python -m py_compile src/train_model_profiles.py
           python -m py_compile src/forecast_profiles.py
+          python -m py_compile src/build_standalone_dashboard.py
 
       - name: Show CLI help
         run: |
@@ -40,3 +41,4 @@ jobs:
           python src/model_status.py --help
           python src/train_model_profiles.py --help
           python src/forecast_profiles.py --help
+          python src/build_standalone_dashboard.py --help
