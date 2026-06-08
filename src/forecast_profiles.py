@@ -20,6 +20,15 @@ import train_model_profiles
 
 FORECAST_DIR = base.OUT / "forecasts"
 DOCS_DIR = base.ROOT / "docs"
+OVERRIDE_COLUMNS = [
+    "lid",
+    "min_forecast_stage_ft",
+    "early_window_ft",
+    "min_stage_rise_ft",
+    "min_r3_rise_rate",
+    "max_remaining_rise_ft",
+    "notes",
+]
 
 
 def finite_float(value: Any) -> float | None:
@@ -49,9 +58,26 @@ def clean(value: Any) -> Any:
 def clean_raw_stage(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.copy()
     df["stage_ft"] = pd.to_numeric(df.get("stage_ft"), errors="coerce")
-    # USGS/no-data sentinels such as -999999 occasionally sneak through. Toss anything impossible.
     df = df[(df["stage_ft"] > -1000) & (df["stage_ft"] < 200)]
     return df
+
+
+def load_overrides(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    df = pd.read_csv(path, dtype=str).fillna("")
+    if "lid" not in df.columns:
+        return {}
+    for col in OVERRIDE_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    df["lid"] = df["lid"].astype(str).str.upper().str.strip()
+    return {str(row["lid"]): row.to_dict() for _, row in df.iterrows()}
+
+
+def override_float(overrides: dict[str, Any], key: str, default: float | None) -> float | None:
+    value = finite_float(overrides.get(key, ""))
+    return value if value is not None else default
 
 
 def nearest_stage_at_or_before(df: pd.DataFrame, when: pd.Timestamp) -> float | None:
@@ -124,16 +150,33 @@ def active_event_flag(
     current_stage: float,
     h0_stage: float,
     r3: float,
+    overrides: dict[str, Any],
     args: argparse.Namespace,
 ) -> tuple[bool, float, str]:
     start_threshold = event_train.event_start_threshold(df["stage_ft"], site)
+    min_forecast_stage = override_float(overrides, "min_forecast_stage_ft", start_threshold)
+    early_window = override_float(overrides, "early_window_ft", args.early_window_ft) or 0.0
+    min_stage_rise = override_float(overrides, "min_stage_rise_ft", args.min_stage_rise_ft) or 0.0
+    min_r3 = override_float(overrides, "min_r3_rise_rate", args.min_r3_rise_rate) or 0.0
     stage_rise = current_stage - h0_stage
-    active = current_stage >= start_threshold or (stage_rise >= args.min_stage_rise_ft and r3 >= args.min_r3_rise_rate)
-    if active:
-        if current_stage >= start_threshold:
-            return True, start_threshold, "current stage at/above event-start threshold"
-        return True, start_threshold, "early rise: stage/rate criteria met"
-    return False, start_threshold, "inactive: below threshold and not rising enough"
+
+    if min_forecast_stage is None:
+        min_forecast_stage = start_threshold
+
+    if current_stage >= min_forecast_stage:
+        return True, float(min_forecast_stage), "current stage at/above forecast threshold"
+
+    near_enough = current_stage >= min_forecast_stage - early_window
+    rising_enough = stage_rise >= min_stage_rise and r3 >= min_r3
+    if near_enough and rising_enough:
+        return True, float(min_forecast_stage), "early rise: near threshold with enough stage/rate rise"
+
+    note = f"inactive: below forecast threshold {min_forecast_stage:.2f} ft"
+    if not near_enough:
+        note += f"; outside early window {early_window:.2f} ft"
+    elif not rising_enough:
+        note += f"; rise/rate below trigger ({stage_rise:.2f} ft, {r3:.2f} ft/hr)"
+    return False, float(min_forecast_stage), note
 
 
 def base_row(site: pd.Series, profile: pd.Series) -> dict[str, Any]:
@@ -152,7 +195,13 @@ def base_row(site: pd.Series, profile: pd.Series) -> dict[str, Any]:
     }
 
 
-def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+def forecast_one(
+    site: pd.Series,
+    profile: pd.Series,
+    profile_skill: dict[str, Any],
+    overrides: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
     lid = str(site["lid"]).upper()
     event_set, _min_crest, label = profile_label(profile)
     reason = str(profile.get("reason", ""))
@@ -185,7 +234,7 @@ def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, A
     r3 = rate(df, current_time, current_stage, 3)
     r6 = rate(df, current_time, current_stage, 6)
     r12 = rate(df, current_time, current_stage, 12)
-    active, start_threshold, active_note = active_event_flag(site, df, current_stage, h0_stage, r3, args)
+    active, threshold_used, active_note = active_event_flag(site, df, current_stage, h0_stage, r3, overrides, args)
 
     shared = {
         "forecast_time_utc": current_time.isoformat(),
@@ -197,13 +246,14 @@ def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, A
         "r3_ft_per_hr": r3,
         "r6_ft_per_hr": r6,
         "r12_ft_per_hr": r12,
-        "event_start_threshold_used_ft": start_threshold,
+        "forecast_threshold_used_ft": threshold_used,
         "model_mae_ft": profile_skill.get("mae_ft", ""),
         "model_bias_ft": profile_skill.get("bias_ft", ""),
         "model_event_count": profile_skill.get("event_count", ""),
         "model_holdout_events": profile_skill.get("holdout_events", ""),
         "model_r2": profile_skill.get("r2", ""),
         "model_file": str(model_file),
+        "override_notes": overrides.get("notes", ""),
     }
     row.update(shared)
 
@@ -232,6 +282,10 @@ def forecast_one(site: pd.Series, profile: pd.Series, profile_skill: dict[str, A
     model = bundle["model"]
     meta = bundle.get("metadata", {})
     remaining = max(0.0, float(model.predict(features[base.FEATURES])[0]))
+    cap = override_float(overrides, "max_remaining_rise_ft", None)
+    if cap is not None and remaining > cap:
+        active_note += f"; remaining rise capped at {cap:.2f} ft by override"
+        remaining = cap
     likely = current_stage + remaining
 
     mae = finite_float(profile_skill.get("mae_ft"))
@@ -281,9 +335,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate latest crest forecasts from profile models.")
     parser.add_argument("--sites", default=str(base.ROOT / "config" / "sites_with_usgs.csv"))
     parser.add_argument("--profiles", default=str(base.ROOT / "config" / "model_profiles.csv"))
+    parser.add_argument("--overrides", default=str(base.ROOT / "config" / "forecast_overrides.csv"))
     parser.add_argument("--profile-summary", default=str(base.REPORT_DIR / "model_profile_summary.csv"))
     parser.add_argument("--lids", default="", help="Optional comma-separated LIDs")
     parser.add_argument("--h0-lookback-hours", type=float, default=48.0)
+    parser.add_argument("--early-window-ft", type=float, default=2.0)
     parser.add_argument("--min-stage-rise-ft", type=float, default=0.75)
     parser.add_argument("--min-r3-rise-rate", type=float, default=0.05)
     parser.add_argument("--output-csv", default=str(FORECAST_DIR / "latest_forecasts.csv"))
@@ -302,6 +358,7 @@ def main() -> None:
 
     profile_by_lid = {str(row["lid"]).upper(): row for _, row in profiles.iterrows()}
     skill_by_lid = load_profile_summary(Path(args.profile_summary))
+    overrides_by_lid = load_overrides(Path(args.overrides))
     rows: list[dict[str, Any]] = []
 
     for _, site in sites.iterrows():
@@ -310,7 +367,7 @@ def main() -> None:
         if profile is None:
             rows.append({"lid": lid, "name": site.get("name", ""), "forecast_status": "missing_profile", "confidence": "none"})
             continue
-        row = forecast_one(site, profile, skill_by_lid.get(lid, {}), args)
+        row = forecast_one(site, profile, skill_by_lid.get(lid, {}), overrides_by_lid.get(lid, {}), args)
         rows.append(row)
         print(f"{lid}: {row.get('forecast_status')} {row.get('run_label')} {row.get('pred_crest_likely_ft', '')}")
 
