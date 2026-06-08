@@ -25,6 +25,18 @@ def read_profiles(path: str | Path) -> pd.DataFrame:
     return df
 
 
+def read_clean_raw(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    df['stage_ft'] = pd.to_numeric(df.get('stage_ft'), errors='coerce')
+    # Drop no-data sentinels and physically impossible junk before event detection/training.
+    before = len(df)
+    df = df[(df['stage_ft'] > -1000) & (df['stage_ft'] < 200)].copy()
+    dropped = before - len(df)
+    if dropped:
+        print(f'  dropped {dropped:,} impossible stage rows from {path.name}')
+    return df
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Train recommended per-gage model profiles.')
     parser.add_argument('--sites', default=str(base.ROOT / 'config' / 'sites_with_usgs.csv'))
@@ -86,7 +98,7 @@ def main() -> None:
             sample_interval=args.sample_interval,
         )
         print(f'Training {lid}: {settings.label}')
-        result = event_train.train_one(lid, pd.read_csv(raw), site_by_lid[lid], settings)
+        result = event_train.train_one(lid, read_clean_raw(raw), site_by_lid[lid], settings)
         result['profile_event_set'] = event_set
         result['profile_min_crest_stage_ft'] = min_crest if min_crest is not None else ''
         result['profile_reason'] = reason
