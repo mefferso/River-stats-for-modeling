@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train crest models using crest-category event filters.
 
-This is a thin add-on around nwps_multigage_model.py. It separates:
+This add-on separates:
 1) event-window detection threshold, and
 2) minimum crest stage required for training.
 """
@@ -64,18 +64,28 @@ def safe_label(text: str) -> str:
 
 
 def as_float(value: Any) -> float | None:
+    """Convert scalar-ish values to float; ignore arrays/lists/dicts.
+
+    NWPS JSON occasionally has arrays under threshold-ish keys. Pandas turns
+    pd.isna(array) into an array of booleans, which cannot be used in an if.
+    This guard keeps threshold discovery from face-planting on that junk.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, tuple, set, np.ndarray, pd.Series, pd.Index)):
+        return None
     try:
-        if value is None or pd.isna(value):
-            return None
-    except TypeError:
-        if value is None:
-            return None
+        missing = pd.isna(value)
+    except Exception:
+        missing = False
+    if isinstance(missing, (bool, np.bool_)) and missing:
+        return None
     text = str(value).strip()
     if not text:
         return None
     try:
         out = float(text)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     return out if math.isfinite(out) else None
 
@@ -92,12 +102,12 @@ def fetch_json(url: str, tries: int = 3) -> Any | None:
     last: Exception | None = None
     for attempt in range(tries):
         try:
-            r = requests.get(url, timeout=45, headers={"User-Agent": "lix-river-eventset-model/0.1"})
+            r = requests.get(url, timeout=45, headers={"User-Agent": "lix-river-eventset-model/0.2"})
             if r.status_code == 404:
                 return None
             r.raise_for_status()
             return r.json()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             last = exc
             time.sleep(0.5 * (attempt + 1))
     print(f"WARN: failed {url}: {last}", file=sys.stderr)
@@ -127,15 +137,12 @@ def recursive_thresholds(obj: Any) -> dict[str, float]:
                 out[col] = value_f
 
     if isinstance(obj, dict):
-        lower_keys = {str(k).lower(): k for k in obj.keys()}
         for k, v in obj.items():
+            key = str(k)
             if isinstance(v, (str, int, float)):
-                keep(str(k), v)
+                keep(key, v)
             elif isinstance(v, dict):
-                lk = str(k).lower()
-                for stage_key in ["stage", "stage_ft", "value", "threshold"]:
-                    if stage_key in lower_keys:
-                        keep(lk, obj[lower_keys[stage_key]])
+                lk = key.lower()
                 nested_lower = {str(kk).lower(): kk for kk in v.keys()}
                 for stage_key in ["stage", "stage_ft", "value", "threshold"]:
                     if stage_key in nested_lower:
@@ -309,7 +316,7 @@ def train_one(lid: str, stage_df: pd.DataFrame, site: pd.Series | dict[str, Any]
     if len(events) < 5:
         return {"lid": lid, "run_label": label, "status": "too_few_events", "event_count": int(len(events))}
 
-    train = base.feature_rows(stage_df, events, lid)
+    train = base.feature_rows(stage_df, events, lid, sample_interval=settings.sample_interval)
     train.to_csv(train_file, index=False)
     if len(train) < 40 or train["event_id"].nunique() < 5:
         return {"lid": lid, "run_label": label, "status": "too_few_training_rows", "event_count": int(len(events)), "training_rows": int(len(train))}
