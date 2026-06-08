@@ -1,0 +1,33 @@
+lid,name,usgs_site,event_threshold_ft,action_stage_ft,flood_stage_ft,notes,discovery_status,candidate_usgs_sites,nwps_latitude,nwps_longitude
+DARL1,Amite River at Darlington,07377000,,,,,auto_from_nwps,07377000,30.8888888888889,-90.8444444444444
+MAGL1,Amite River at Magnolia,07377300,,,,,auto_from_nwps,07377300,30.534722222222,-90.980555555556
+DENL1,Amite River at Denham Springs,07378500,,,,,auto_from_nwps,07378500,30.4638888888889,-90.9902777777778
+BYML1,Amite River at Bayou Manchac,,,,,,not_found,,,
+PVLL1,Amite River at Port Vincent,07380120,,,,,auto_from_nwps,07380120,30.3325,-90.8519444444444
+OLVL1,Comite River at Olive Branch,07377500,,,,,auto_from_nwps,07377500,30.75638889,-91.04388889
+CMTL1,Comite River at Joor Road,07378000,,,,,auto_from_nwps,07378000,30.5125,-91.073611111111
+LPOL1,Tickfaw River at Liverpool,07375800,,,,,auto_from_nwps,07375800,30.9305555555556,-90.6733333333333
+MONL1,Tickfaw River at Montpelier,07375960,,,,,auto_from_nwps,07375960,30.686111111111,-90.643055555556
+HOLL1,Tickfaw River at Holden,07376000,,,,,auto_from_nwps,07376000,30.503611111111,-90.677222222222
+NRBL1,Natalbany River at Baptist,07376500,,,,,auto_from_nwps,07376500,30.504166666667,-90.545833333333
+OSYM6,Tangipahoa River at Osyka,07375280,,,,,auto_from_nwps,07375280,31.012222222222,-90.461111111111
+KENL1,Tangipahoa River at Kentwood,07375300,,,,,auto_from_nwps,07375300,30.9375,-90.4902777777778
+AMIL1,Tangipahoa River at Amite,07375430,,,,,auto_from_nwps,07375430,30.728888888889,-90.484166666667
+ROBL1,Tangipahoa River at Robert,07375500,,,,,auto_from_nwps,07375500,30.506388888889,-90.361666666667
+FLSL1,Tchefuncte River near Folsom,07375000,,,,,auto_from_nwps,07375000,30.615833333333,-90.248611111111
+CUSL1,Tchefuncte River near Covington / Hwy 190,07375050,,,,,auto_from_nwps,07375050,30.494444444444,-90.169444444444
+CGSL1,Bogue Falaya River at Camp Covington,07375105,,,,,auto_from_nwps,07375105,30.5566666666667,-90.1461111111111
+CVEL1,Bogue Falaya River at Boston Street Covington,07375175,,,,,auto_from_nwps,07375175,30.476388888889,-90.089444444444
+TYTM6,Bogue Chitto River at Tylertown,02490500,,,,,auto_from_nwps,02490500,31.176944444444,-90.28
+FRNL1,Bogue Chitto River at Franklinton,02491500,,,,,auto_from_nwps,02491500,30.8427777777778,-90.1619444444444
+BSHL1,Bogue Chitto River at Bush,02492000,,,,,auto_from_nwps,02492000,30.6291666666667,-89.8972222222222
+BXAL1,Pearl River at Bogalusa,02489500,,,,,auto_from_nwps,02489500,30.7930555555556,-89.8208333333333
+PERL1,Pearl River near Pearl River,02492600,,,,,auto_from_nwps,02492600,30.385,-89.7366666666667
+MNLM6,West Hobolochitto Creek near McNeil,02492360,,,,,auto_from_nwps,02492360,30.662222222222,-89.686111111111
+CREM6,East Hobolochitto Creek near Caesar,02492343,,,,,auto_from_nwps,02492343,30.571388888889,-89.594722222222
+KLNM6,Jourdan River at Kiln / Bay St. Louis,02481660,,,,,auto_from_nwps,02481660,30.387222222222,-89.441388888889
+GLFM6,Wolf River near Gulfport,02481521,,,,,auto_from_nwps,02481521,30.3933333333333,-89.2063888888889
+LYMM6,Biloxi River near Lyman,02481130,,,,,auto_from_nwps,02481130,30.4883333333333,-89.0358333333333
+DIBM6,Tchoutacabouffa River near D’Iberville,02480590,,,,,auto_from_nwps,02480590,30.476111111111,-88.893611111111
+PGFM6,Pascagoula River at Graham Ferry,02479310,,,,,auto_from_nwps,02479310,30.610555555556,-88.641388888889
+ORAM6,Escatawpa River near Orange Grove,0248018020,,,,,auto_from_nwps,0248018020,30.458611111111,-88.451944444444
