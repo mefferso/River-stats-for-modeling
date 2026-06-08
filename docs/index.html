@@ -18,88 +18,31 @@
       --accent: #38bdf8;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    header {
-      padding: 22px 28px 12px;
-      border-bottom: 1px solid var(--line);
-      background: linear-gradient(135deg, #111827, #0f172a);
-    }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--text); }
+    header { padding: 22px 28px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #111827, #0f172a); }
     h1 { margin: 0 0 6px; font-size: 1.45rem; }
     .sub { color: var(--muted); font-size: 0.92rem; }
     main { padding: 18px 28px 32px; }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 12px 14px;
-    }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
     .card .label { color: var(--muted); font-size: 0.8rem; }
     .card .value { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
-    .controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin: 0 0 14px;
-    }
-    input, select {
-      background: #0b1220;
-      color: var(--text);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 9px 10px;
-      font-size: 0.9rem;
-    }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; }
+    input, select { background: #0b1220; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font-size: 0.9rem; }
     input { min-width: 230px; }
-    .table-wrap {
-      overflow-x: auto;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: var(--panel);
-    }
-    table { border-collapse: collapse; min-width: 1250px; width: 100%; }
-    th, td {
-      padding: 9px 10px;
-      border-bottom: 1px solid var(--line);
-      text-align: right;
-      white-space: nowrap;
-      font-size: 0.86rem;
-    }
-    th {
-      color: #cbd5e1;
-      background: #111827;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      cursor: pointer;
-    }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+    table { border-collapse: collapse; min-width: 1350px; width: 100%; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; font-size: 0.86rem; }
+    th { color: #cbd5e1; background: #111827; position: sticky; top: 0; z-index: 1; cursor: pointer; }
     td.left, th.left { text-align: left; }
     tr:hover { background: #172033; }
-    .pill {
-      display: inline-block;
-      min-width: 56px;
-      text-align: center;
-      padding: 3px 8px;
-      border-radius: 999px;
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
+    .pill { display: inline-block; min-width: 56px; text-align: center; padding: 3px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
     .high { background: var(--good); color: #dcfce7; }
     .medium { background: var(--med); color: #fef3c7; }
     .low { background: var(--low); color: #fee2e2; }
     .none { background: var(--none); color: #e5e7eb; }
     .ok { color: #86efac; }
+    .inactive { color: #93c5fd; }
     .skipped, .missing_model, .missing_raw, .empty_raw { color: #fca5a5; }
     footer { color: var(--muted); font-size: 0.78rem; margin-top: 14px; line-height: 1.45; }
     a { color: var(--accent); }
@@ -124,6 +67,7 @@
       <select id="status">
         <option value="">All statuses</option>
         <option value="ok">OK</option>
+        <option value="inactive">Inactive</option>
         <option value="skipped">Skipped</option>
         <option value="missing_model">Missing model</option>
         <option value="missing_raw">Missing raw</option>
@@ -136,6 +80,7 @@
             <th class="left" data-key="lid">LID</th>
             <th class="left" data-key="name">Name</th>
             <th data-key="current_stage_ft">Stage</th>
+            <th data-key="forecast_threshold_used_ft">Threshold</th>
             <th data-key="r1_ft_per_hr">1h rate</th>
             <th data-key="r3_ft_per_hr">3h rate</th>
             <th data-key="pred_remaining_rise_ft">Remain</th>
@@ -176,15 +121,17 @@
 
     function renderCards(data) {
       const ok = data.filter(r => r.forecast_status === 'ok').length;
-      const skipped = data.filter(r => r.forecast_status === 'skipped').length;
+      const inactive = data.filter(r => r.forecast_status === 'inactive').length;
       const high = data.filter(r => r.confidence === 'high').length;
       const med = data.filter(r => r.confidence === 'medium').length;
+      const unavailable = data.filter(r => ['skipped','missing_model','missing_raw','empty_raw','missing_profile'].includes(r.forecast_status)).length;
       document.getElementById('cards').innerHTML = [
         card('Total LIDs', data.length),
         card('Forecast OK', ok),
+        card('Inactive', inactive),
         card('High confidence', high),
         card('Medium confidence', med),
-        card('Skipped / unavailable', skipped)
+        card('Skipped / unavailable', unavailable)
       ].join('');
     }
 
@@ -193,7 +140,7 @@
       const conf = document.getElementById('confidence').value;
       const status = document.getElementById('status').value;
       return forecasts.filter(r => {
-        const text = `${r.lid} ${r.name} ${r.run_label} ${r.forecast_status} ${r.forecast_note}`.toLowerCase();
+        const text = `${r.lid} ${r.name} ${r.run_label} ${r.forecast_status} ${r.forecast_note} ${r.override_notes}`.toLowerCase();
         return (!q || text.includes(q)) && (!conf || r.confidence === conf) && (!status || r.forecast_status === status);
       }).sort((a, b) => {
         const av = a[sortKey] ?? '';
@@ -212,6 +159,7 @@
           <td class="left"><strong>${r.lid || ''}</strong></td>
           <td class="left">${r.name || ''}</td>
           <td>${fmt(r.current_stage_ft)}</td>
+          <td>${fmt(r.forecast_threshold_used_ft)}</td>
           <td>${fmt(r.r1_ft_per_hr)}</td>
           <td>${fmt(r.r3_ft_per_hr)}</td>
           <td>${fmt(r.pred_remaining_rise_ft)}</td>
