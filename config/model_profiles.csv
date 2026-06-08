@@ -1,0 +1,33 @@
+lid,recommended_event_set,recommended_min_crest_stage_ft,reason
+DARL1,custom,16,too few flood-plus events; use action-stage-plus training
+MAGL1,custom,47,too few flood-plus events; use action-stage-plus training
+DENL1,flood,,strong flood-plus baseline
+BYML1,skip,,no USGS/raw mapping yet
+PVLL1,flood,,use flood-plus baseline
+OLVL1,custom,16,too few flood-plus events; use action-stage-plus training
+CMTL1,flood,,moderate not selected yet; flood-plus baseline needs review for bias
+LPOL1,flood,,flood-plus strong; moderate has too few events despite good score
+MONL1,flood,,use flood-plus baseline
+HOLL1,flood,,use flood-plus baseline
+NRBL1,flood,,use flood-plus baseline
+OSYM6,flood,,strong flood-plus baseline
+KENL1,flood,,use flood-plus baseline
+AMIL1,custom,18,too few flood-plus events; use action/custom threshold training
+ROBL1,flood,,moderate-plus performed worse; use flood-plus baseline
+FLSL1,flood,,moderate-plus performed worse; use flood-plus baseline
+CUSL1,moderate,,moderate-plus improved versus flood-plus
+CGSL1,moderate,,moderate-plus improved but still needs review
+CVEL1,moderate,,moderate-plus improved versus flood-plus
+TYTM6,moderate,,moderate-plus improved versus flood-plus
+FRNL1,flood,,moderate-plus too sparse; use flood-plus baseline
+BSHL1,flood,,use flood-plus baseline
+BXAL1,flood,,solid flood-plus baseline
+PERL1,flood,,flood-plus baseline selected despite good sparse moderate score
+MNLM6,flood,,moderate underforecasted; use flood-plus baseline
+CREM6,moderate,,strong moderate-plus model
+KLNM6,flood,,flood-plus baseline but likely mixed/tidal/backwater review needed
+GLFM6,flood,,strong flood-plus baseline
+LYMM6,moderate,,moderate-plus improved versus flood-plus
+DIBM6,flood,,use flood-plus baseline; needs review
+PGFM6,flood,,use flood-plus baseline
+ORAM6,custom,6,too few flood-plus events; use action-stage-plus training
