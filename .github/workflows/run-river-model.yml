@@ -15,6 +15,8 @@ on:
           - download
           - train
           - run-all
+          - profile-run
+          - profile-train
           - status
       years:
         description: Years of USGS data for download/train/run-all
@@ -24,6 +26,10 @@ on:
         description: Only first N sites; 0 means all sites
         required: true
         default: '1'
+      selected_lids:
+        description: Optional comma-separated LIDs, e.g. DARL1,MAGL1,OLVL1
+        required: false
+        default: ''
       event_set:
         description: Event set to train
         required: true
@@ -68,6 +74,7 @@ jobs:
           MODE: ${{ inputs.mode }}
           YEARS: ${{ inputs.years }}
           LIMIT: ${{ inputs.limit }}
+          SELECTED_LIDS: ${{ inputs.selected_lids }}
           EVENT_SET: ${{ inputs.event_set }}
           MIN_CREST_STAGE: ${{ inputs.min_crest_stage }}
           FORCE_DOWNLOAD: ${{ inputs.force_download }}
@@ -79,6 +86,7 @@ jobs:
           mode = os.environ['MODE']
           years = int(os.environ['YEARS'])
           limit = int(os.environ['LIMIT'])
+          selected_lids = os.environ.get('SELECTED_LIDS', '').strip()
           event_set = os.environ['EVENT_SET']
           min_crest_stage = os.environ.get('MIN_CREST_STAGE', '').strip()
           force = os.environ['FORCE_DOWNLOAD'].lower() == 'true'
@@ -100,17 +108,29 @@ jobs:
           force_arg = ['--force'] if force else ['--skip-existing']
           crest_arg = ['--min-crest-stage', min_crest_stage] if min_crest_stage else []
 
-          discover = ['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', 'config/sites_with_usgs.csv']
-          thresholds = ['python', 'src/crest_eventset_train.py', 'discover-thresholds', '--sites', 'config/sites_with_usgs.csv', '--output', 'config/sites_with_usgs.csv']
-          download = ['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', years] + force_arg
-          train = ['python', 'src/crest_eventset_train.py', 'train', '--sites', 'config/sites_with_usgs.csv', '--event-set', event_set] + crest_arg
-          status = ['python', 'src/model_status.py', '--sites', 'config/sites_with_usgs.csv']
+          discovered = 'config/sites_with_usgs.csv'
+          active_sites = 'config/sites_active.csv' if selected_lids or limit else discovered
+
+          discover = ['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', discovered]
+          thresholds = ['python', 'src/crest_eventset_train.py', 'discover-thresholds', '--sites', discovered, '--output', discovered]
+          make_active = ['python', 'src/filter_sites.py', '--sites', discovered, '--lids', selected_lids, '--limit', limit, '--output', active_sites]
+          download = ['python', 'src/nwps_multigage_model.py', 'download', '--sites', active_sites, '--years', years] + force_arg
+          train = ['python', 'src/crest_eventset_train.py', 'train', '--sites', active_sites, '--event-set', event_set] + crest_arg
+          profile_train = ['python', 'src/train_model_profiles.py', '--sites', active_sites, '--lids', selected_lids]
+          status = ['python', 'src/model_status.py', '--sites', active_sites]
+
+          def prepare_sites():
+              run(discover)
+              run(thresholds)
+              if active_sites != discovered:
+                  run(make_active)
 
           if mode == 'smoke':
               run(discover)
               run(thresholds)
-              run(with_limit(['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', 1] + force_arg))
-              run(with_limit(train))
+              run(make_active)
+              run(['python', 'src/nwps_multigage_model.py', 'download', '--sites', active_sites, '--years', 1] + force_arg)
+              run(train)
               run(status)
           elif mode == 'discover':
               run(discover)
@@ -118,24 +138,34 @@ jobs:
               run(discover)
               run(thresholds)
           elif mode == 'download':
-              run(discover)
-              run(thresholds)
-              run(with_limit(download))
+              prepare_sites()
+              run(download)
               run(status)
           elif mode == 'train':
-              run(discover)
-              run(thresholds)
-              run(with_limit(download))
-              run(with_limit(train))
+              prepare_sites()
+              run(download)
+              run(train)
               run(status)
           elif mode == 'run-all':
-              run(discover)
-              run(thresholds)
-              run(with_limit(download))
-              run(with_limit(train))
+              prepare_sites()
+              run(download)
+              run(train)
+              run(status)
+          elif mode == 'profile-run':
+              prepare_sites()
+              run(download)
+              run(profile_train)
+              run(status)
+          elif mode == 'profile-train':
+              if active_sites != discovered:
+                  if not os.path.exists(discovered):
+                      run(discover)
+                      run(thresholds)
+                  run(make_active)
+              run(profile_train)
               run(status)
           elif mode == 'status':
-              site_file = 'config/sites_with_usgs.csv' if os.path.exists('config/sites_with_usgs.csv') else 'config/sites.csv'
+              site_file = active_sites if os.path.exists(active_sites) else (discovered if os.path.exists(discovered) else 'config/sites.csv')
               run(['python', 'src/model_status.py', '--sites', site_file])
           else:
               raise SystemExit(f'Unknown mode: {mode}')
@@ -148,6 +178,8 @@ jobs:
           name: river-model-output
           path: |
             config/sites_with_usgs.csv
+            config/sites_active.csv
+            config/model_profiles.csv
             data/processed/
             output/
           if-no-files-found: ignore
