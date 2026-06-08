@@ -2,17 +2,9 @@
 """
 LIX multi-gage crest model builder.
 
-What it does:
-1. Reads NWS LIDs from config/sites.csv
-2. Tries to discover USGS site IDs from NWPS metadata
-3. Downloads historical USGS gage height/stage data
-4. Detects flood/rise events
-5. Builds station-specific remaining-rise models
-6. Outputs model equations, skill scores, and forecast CLI
-
-This is intentionally conservative and auditable. It favors a plain Ridge
-regression formula over a black-box model, because operationally you need to
-know when the model is full of crap.
+Builds station-specific remaining-rise / final-crest models from historical river
+stage time series. The intent is an auditable statistical aid: current stage +
+rate-of-rise behavior + basin memory -> estimated remaining rise.
 """
 
 from __future__ import annotations
@@ -22,10 +14,11 @@ import json
 import math
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import joblib
 import numpy as np
@@ -46,6 +39,7 @@ MODEL_DIR = OUT / "models"
 REPORT_DIR = OUT / "reports"
 
 USGS_IV_URL = "https://waterservices.usgs.gov/nwis/iv/"
+USGS_SITE_URL = "https://waterservices.usgs.gov/nwis/site/"
 NWPS_GAUGE_URLS = [
     "https://api.water.noaa.gov/nwps/v1/gauges/{lid}",
     "https://api.water.noaa.gov/nwps/v1/gauges/{lid}/stageflow",
@@ -64,10 +58,47 @@ FEATURES = [
     "stage_above_h0_ft",
 ]
 
+SITE_COLUMNS = [
+    "lid",
+    "name",
+    "usgs_site",
+    "event_threshold_ft",
+    "action_stage_ft",
+    "flood_stage_ft",
+    "notes",
+]
+
+
+@dataclass
+class EventSettings:
+    min_total_rise_ft: float = 1.0
+    below_threshold_hours_to_end: float = 24.0
+    pre_crest_lookback_hours: float = 48.0
+    include_pre_event_hours: float = 24.0
+    sample_interval: str = "1h"
+
 
 def ensure_dirs() -> None:
     for p in [DATA_RAW, DATA_PROCESSED, MODEL_DIR, REPORT_DIR]:
         p.mkdir(parents=True, exist_ok=True)
+
+
+def coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        x = float(s)
+    except ValueError:
+        return None
+    return x if math.isfinite(x) else None
 
 
 def read_sites(path: str | Path) -> pd.DataFrame:
@@ -75,74 +106,186 @@ def read_sites(path: str | Path) -> pd.DataFrame:
     required = {"lid", "name"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(f"sites file missing required columns: {missing}")
-    if "usgs_site" not in df.columns:
-        df["usgs_site"] = ""
-    df["lid"] = df["lid"].str.upper().str.strip()
+        raise ValueError(f"sites file missing required columns: {sorted(missing)}")
+    for col in SITE_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    df = df[SITE_COLUMNS + [c for c in df.columns if c not in SITE_COLUMNS]]
+    df["lid"] = df["lid"].astype(str).str.upper().str.strip()
+    df["name"] = df["name"].astype(str).str.strip()
     df["usgs_site"] = df["usgs_site"].astype(str).str.strip()
     return df
 
 
+def write_sites(df: pd.DataFrame, path: str | Path) -> None:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out, index=False)
+
+
+def fetch_json(
+    url: str,
+    params: dict[str, Any] | None = None,
+    timeout: int = 45,
+    tries: int = 3,
+    sleep_seconds: float = 0.5,
+) -> Any | None:
+    last_err: Exception | None = None
+    for attempt in range(1, tries + 1):
+        try:
+            r = requests.get(
+                url,
+                params=params,
+                timeout=timeout,
+                headers={"User-Agent": "lix-river-crest-model/0.2"},
+            )
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            return r.json()
+        except Exception as exc:  # noqa: BLE001 - command-line tool should keep moving
+            last_err = exc
+            if attempt < tries:
+                time.sleep(sleep_seconds * attempt)
+    print(f"WARN: failed {url}: {last_err}", file=sys.stderr)
+    return None
+
+
 def recursive_find_usgs(obj: Any) -> list[str]:
-    """Find plausible 8-15 digit USGS IDs anywhere in NWPS metadata."""
+    """Find plausible 7-15 digit USGS IDs anywhere in NWPS metadata."""
     found: list[str] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
             key = str(k).lower()
             if "usgs" in key and isinstance(v, (str, int, float)):
-                s = str(v)
-                found += re.findall(r"\b\d{7,15}\b", s)
+                found += re.findall(r"\b\d{7,15}\b", str(v))
             found += recursive_find_usgs(v)
     elif isinstance(obj, list):
         for item in obj:
             found += recursive_find_usgs(item)
-    elif isinstance(obj, str):
-        if "usgs" in obj.lower():
-            found += re.findall(r"\b\d{7,15}\b", obj)
+    elif isinstance(obj, str) and "usgs" in obj.lower():
+        found += re.findall(r"\b\d{7,15}\b", obj)
     return sorted(set(found))
 
 
-def fetch_json(url: str, params: dict[str, Any] | None = None, timeout: int = 45) -> Any | None:
-    try:
-        r = requests.get(url, params=params, timeout=timeout, headers={"User-Agent": "lix-river-crest-model/0.1"})
-        if r.status_code == 404:
-            return None
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"WARN: failed {url}: {e}", file=sys.stderr)
-        return None
+def recursive_find_latlon(obj: Any) -> tuple[float | None, float | None]:
+    """Best-effort extraction of latitude/longitude from NWPS-ish JSON."""
+    lat_keys = {"lat", "latitude", "y"}
+    lon_keys = {"lon", "lng", "longitude", "x"}
+    if isinstance(obj, dict):
+        lower = {str(k).lower(): v for k, v in obj.items()}
+        lat = next((coerce_float(lower[k]) for k in lat_keys if k in lower), None)
+        lon = next((coerce_float(lower[k]) for k in lon_keys if k in lower), None)
+        if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
+        for v in obj.values():
+            lat, lon = recursive_find_latlon(v)
+            if lat is not None and lon is not None:
+                return lat, lon
+    elif isinstance(obj, list):
+        for item in obj:
+            lat, lon = recursive_find_latlon(item)
+            if lat is not None and lon is not None:
+                return lat, lon
+    return None, None
 
 
-def discover_sites(args: argparse.Namespace) -> None:
+def command_discover_sites(args: argparse.Namespace) -> None:
     ensure_dirs()
     sites = read_sites(args.sites)
-    rows = []
+    rows: list[dict[str, Any]] = []
+
     for _, row in sites.iterrows():
-        lid = row["lid"]
-        usgs = row.get("usgs_site", "").strip()
+        out_row = row.to_dict()
+        lid = out_row["lid"]
+        existing_usgs = str(out_row.get("usgs_site", "")).strip()
+        candidates: list[str] = []
         meta = None
-        if not usgs:
+
+        if not existing_usgs:
             for tmpl in NWPS_GAUGE_URLS:
-                meta = fetch_json(tmpl.format(lid=lid.lower())) or fetch_json(tmpl.format(lid=lid.upper()))
-                if meta:
-                    ids = recursive_find_usgs(meta)
-                    if ids:
-                        usgs = ids[0]
-                        break
-        rows.append({"lid": lid, "name": row["name"], "usgs_site": usgs})
-        print(f"{lid:6s} {usgs or 'NO_USGS_ID_FOUND'}")
-    out = Path(args.output or ROOT / "config" / "sites_with_usgs.csv")
-    pd.DataFrame(rows).to_csv(out, index=False)
+                for candidate_lid in [lid.lower(), lid.upper()]:
+                    meta = fetch_json(tmpl.format(lid=candidate_lid), timeout=60)
+                    if meta:
+                        candidates = recursive_find_usgs(meta)
+                        if candidates:
+                            break
+                if candidates:
+                    break
+
+        if existing_usgs:
+            status = "already_set"
+            selected = existing_usgs
+        elif candidates:
+            status = "auto_from_nwps"
+            selected = candidates[0]
+        else:
+            status = "not_found"
+            selected = ""
+
+        out_row["usgs_site"] = selected
+        out_row["discovery_status"] = status
+        out_row["candidate_usgs_sites"] = ";".join(candidates)
+
+        if meta:
+            lat, lon = recursive_find_latlon(meta)
+            out_row["nwps_latitude"] = lat if lat is not None else ""
+            out_row["nwps_longitude"] = lon if lon is not None else ""
+
+        rows.append(out_row)
+        print(f"{lid:6s} {selected or 'NO_USGS_ID_FOUND':>15s}  {status}")
+
+    out = Path(args.output)
+    write_sites(pd.DataFrame(rows), out)
     print(f"\nWrote {out}")
+    print("Review blanks in usgs_site. A bad LID-to-USGS mapping will poison the model, because rivers enjoy being assholes.")
 
 
-def download_usgs_stage(site: str, start: datetime, end: datetime) -> pd.DataFrame:
+def parse_usgs_iv_json(data: Any) -> pd.DataFrame:
+    recs: list[dict[str, Any]] = []
+    try:
+        ts_list = data["value"]["timeSeries"]
+    except Exception:
+        return pd.DataFrame(columns=["datetime", "stage_ft"])
+
+    for ts in ts_list:
+        for group in ts.get("values", []):
+            for v in group.get("value", []):
+                stage = coerce_float(v.get("value"))
+                if stage is None:
+                    continue
+                recs.append(
+                    {
+                        "datetime": v.get("dateTime"),
+                        "stage_ft": stage,
+                        "qualifiers": ";".join(v.get("qualifiers", [])),
+                    }
+                )
+    if not recs:
+        return pd.DataFrame(columns=["datetime", "stage_ft", "qualifiers"])
+    df = pd.DataFrame(recs)
+    df["datetime"] = pd.to_datetime(df["datetime"], utc=True, errors="coerce")
+    df["stage_ft"] = pd.to_numeric(df["stage_ft"], errors="coerce")
+    return (
+        df.dropna(subset=["datetime", "stage_ft"])
+        .drop_duplicates("datetime")
+        .sort_values("datetime")
+        .reset_index(drop=True)
+    )
+
+
+def download_usgs_stage(
+    site: str,
+    start: datetime,
+    end: datetime,
+    chunk_months: int = 12,
+    sleep_seconds: float = 0.1,
+) -> pd.DataFrame:
     """Download USGS instantaneous gage height (00065), chunked to avoid huge requests."""
-    chunks = []
+    chunks: list[pd.DataFrame] = []
     cursor = start
     while cursor < end:
-        chunk_end = min(cursor + relativedelta(months=6), end)
+        chunk_end = min(cursor + relativedelta(months=chunk_months), end)
         params = {
             "format": "json",
             "sites": site,
@@ -151,87 +294,112 @@ def download_usgs_stage(site: str, start: datetime, end: datetime) -> pd.DataFra
             "endDT": chunk_end.strftime("%Y-%m-%d"),
             "siteStatus": "all",
         }
-        data = fetch_json(USGS_IV_URL, params=params, timeout=90)
+        data = fetch_json(USGS_IV_URL, params=params, timeout=120, tries=3)
         if data:
-            try:
-                ts_list = data["value"]["timeSeries"]
-                for ts in ts_list:
-                    vals = ts["values"][0]["value"]
-                    recs = []
-                    for v in vals:
-                        try:
-                            stage = float(v["value"])
-                        except Exception:
-                            continue
-                        if math.isfinite(stage):
-                            recs.append({"datetime": v["dateTime"], "stage_ft": stage})
-                    if recs:
-                        chunks.append(pd.DataFrame(recs))
-            except Exception as e:
-                print(f"WARN: could not parse USGS response for {site}: {e}", file=sys.stderr)
+            chunk = parse_usgs_iv_json(data)
+            if not chunk.empty:
+                chunks.append(chunk)
         cursor = chunk_end + timedelta(days=1)
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
     if not chunks:
-        return pd.DataFrame(columns=["datetime", "stage_ft"])
+        return pd.DataFrame(columns=["datetime", "stage_ft", "qualifiers"])
+
     df = pd.concat(chunks, ignore_index=True)
-    df["datetime"] = pd.to_datetime(df["datetime"], utc=True, errors="coerce")
-    df = df.dropna(subset=["datetime", "stage_ft"]).drop_duplicates("datetime").sort_values("datetime")
-    return df
+    return (
+        df.dropna(subset=["datetime", "stage_ft"])
+        .drop_duplicates("datetime")
+        .sort_values("datetime")
+        .reset_index(drop=True)
+    )
 
 
 def command_download(args: argparse.Namespace) -> None:
     ensure_dirs()
     sites = read_sites(args.sites)
-    end = datetime.now(timezone.utc)
-    start = end - relativedelta(years=int(args.years))
+    end = pd.Timestamp(args.end, tz="UTC").to_pydatetime() if args.end else datetime.now(timezone.utc)
+    start = pd.Timestamp(args.start, tz="UTC").to_pydatetime() if args.start else end - relativedelta(years=int(args.years))
+
+    if args.limit:
+        sites = sites.head(args.limit)
+
     for _, row in sites.iterrows():
         lid = row["lid"]
-        site = row["usgs_site"].strip()
+        site = str(row.get("usgs_site", "")).strip()
         if not site:
             print(f"SKIP {lid}: no usgs_site")
             continue
-        print(f"Downloading {lid} / USGS {site} from {start.date()} to {end.date()}")
-        df = download_usgs_stage(site, start, end)
+
         out = DATA_RAW / f"{lid}_usgs_stage.csv"
+        if out.exists() and args.skip_existing and not args.force:
+            print(f"SKIP {lid}: {out} already exists")
+            continue
+
+        print(f"Downloading {lid} / USGS {site} from {start.date()} to {end.date()}")
+        df = download_usgs_stage(
+            site,
+            start=start,
+            end=end,
+            chunk_months=args.chunk_months,
+            sleep_seconds=args.sleep_seconds,
+        )
         df.to_csv(out, index=False)
         print(f"  {len(df):,} rows -> {out}")
 
 
-def prep_stage(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df["datetime"] = pd.to_datetime(df["datetime"], utc=True, errors="coerce")
-    df = df.dropna(subset=["datetime", "stage_ft"]).sort_values("datetime")
-    df = df.set_index("datetime")
-    # Standardize to 15-min. Interpolate small holes only; do not bridge giant outages.
-    s = df["stage_ft"].resample("15min").median().interpolate(limit=4)
-    out = s.to_frame()
-    out["stage_ft"] = out["stage_ft"].rolling(3, center=True, min_periods=1).median()
-    return out.reset_index()
+def prep_stage(df: pd.DataFrame, freq: str = "15min") -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["datetime", "stage_ft"])
+    out = df.copy()
+    out["datetime"] = pd.to_datetime(out["datetime"], utc=True, errors="coerce")
+    out["stage_ft"] = pd.to_numeric(out["stage_ft"], errors="coerce")
+    out = out.dropna(subset=["datetime", "stage_ft"]).sort_values("datetime")
+    if out.empty:
+        return pd.DataFrame(columns=["datetime", "stage_ft"])
+
+    out = out.set_index("datetime")
+    s = out["stage_ft"].resample(freq).median().interpolate(limit=4)
+    clean = s.to_frame()
+    clean["stage_ft"] = clean["stage_ft"].rolling(3, center=True, min_periods=1).median()
+    return clean.reset_index().dropna(subset=["stage_ft"])
 
 
-def auto_event_threshold(stage: pd.Series) -> float:
-    """Fallback event threshold. Operationally, replace with action stage if desired."""
+def choose_event_threshold(stage: pd.Series, site_row: pd.Series | dict[str, Any] | None = None) -> float:
+    if site_row is not None:
+        for col in ["event_threshold_ft", "action_stage_ft", "flood_stage_ft"]:
+            x = coerce_float(site_row.get(col, "") if isinstance(site_row, dict) else site_row.get(col, ""))
+            if x is not None:
+                return x
+
     q90 = float(stage.quantile(0.90))
     q75 = float(stage.quantile(0.75))
-    # Avoid letting low-flow noise make events everywhere.
     return max(q90, q75 + 1.0)
 
 
-def detect_events(stage_df: pd.DataFrame, threshold: float | None = None) -> pd.DataFrame:
+def detect_events(
+    stage_df: pd.DataFrame,
+    site_row: pd.Series | dict[str, Any] | None = None,
+    settings: EventSettings | None = None,
+) -> pd.DataFrame:
+    settings = settings or EventSettings()
     df = prep_stage(stage_df)
     if df.empty:
         return pd.DataFrame()
-    threshold = float(threshold) if threshold is not None else auto_event_threshold(df["stage_ft"])
+
+    threshold = choose_event_threshold(df["stage_ft"], site_row)
     df["above"] = df["stage_ft"] >= threshold
-    events = []
+    events: list[tuple[int, int]] = []
     in_event = False
-    start_idx = None
+    start_idx: int | None = None
     below_count = 0
-    min_gap_steps = 24 * 4  # 24 hours below threshold ends event
+    min_gap_steps = max(1, int(settings.below_threshold_hours_to_end * 4))
+    pre_steps = max(0, int(settings.include_pre_event_hours * 4))
 
     for i, above in enumerate(df["above"].to_numpy()):
         if above and not in_event:
             in_event = True
-            start_idx = max(0, i - 24 * 4)  # include prior day for rise start
+            start_idx = max(0, i - pre_steps)
             below_count = 0
         elif in_event:
             if above:
@@ -239,52 +407,70 @@ def detect_events(stage_df: pd.DataFrame, threshold: float | None = None) -> pd.
             else:
                 below_count += 1
                 if below_count >= min_gap_steps:
-                    end_idx = i
-                    events.append((start_idx, end_idx))
+                    events.append((start_idx or 0, i))
                     in_event = False
                     start_idx = None
                     below_count = 0
     if in_event and start_idx is not None:
         events.append((start_idx, len(df) - 1))
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     for event_num, (a, b) in enumerate(events, start=1):
-        ev = df.iloc[a:b + 1].copy()
+        ev = df.iloc[a : b + 1].copy()
         if len(ev) < 12:
             continue
+
         peak_idx = ev["stage_ft"].idxmax()
         peak_time = ev.loc[peak_idx, "datetime"]
         peak_stage = float(ev.loc[peak_idx, "stage_ft"])
-        # Rise start = lowest stage in the 48h before peak within event window.
+
         pre_peak = ev[ev["datetime"] <= peak_time].copy()
         if pre_peak.empty:
             continue
-        lookback_start = peak_time - pd.Timedelta(hours=48)
+
+        lookback_start = peak_time - pd.Timedelta(hours=settings.pre_crest_lookback_hours)
         rise_window = pre_peak[pre_peak["datetime"] >= lookback_start]
         if rise_window.empty:
             rise_window = pre_peak
+
         h0_idx = rise_window["stage_ft"].idxmin()
         h0_time = ev.loc[h0_idx, "datetime"]
         h0_stage = float(ev.loc[h0_idx, "stage_ft"])
-        if peak_stage - h0_stage < 1.0:
+        total_rise = peak_stage - h0_stage
+        if total_rise < settings.min_total_rise_ft:
             continue
-        rows.append({
-            "event_id": f"E{event_num:04d}_{peak_time.strftime('%Y%m%d%H%M')}",
-            "start_time": ev.iloc[0]["datetime"],
-            "rise_start_time": h0_time,
-            "crest_time": peak_time,
-            "end_time": ev.iloc[-1]["datetime"],
-            "h0_stage_ft": h0_stage,
-            "crest_stage_ft": peak_stage,
-            "total_rise_ft": peak_stage - h0_stage,
-            "threshold_used_ft": threshold,
-        })
+
+        rows.append(
+            {
+                "event_id": f"E{event_num:04d}_{peak_time.strftime('%Y%m%d%H%M')}",
+                "start_time": ev.iloc[0]["datetime"],
+                "rise_start_time": h0_time,
+                "crest_time": peak_time,
+                "end_time": ev.iloc[-1]["datetime"],
+                "h0_stage_ft": h0_stage,
+                "crest_stage_ft": peak_stage,
+                "total_rise_ft": total_rise,
+                "threshold_used_ft": threshold,
+                "duration_hr": (ev.iloc[-1]["datetime"] - ev.iloc[0]["datetime"]).total_seconds() / 3600,
+                "rise_duration_hr": (peak_time - h0_time).total_seconds() / 3600,
+            }
+        )
     return pd.DataFrame(rows)
 
 
-def feature_rows(stage_df: pd.DataFrame, events: pd.DataFrame, lid: str) -> pd.DataFrame:
+def nearest_stage_at(df: pd.DataFrame, t: pd.Timestamp, tolerance: pd.Timedelta = pd.Timedelta(minutes=30)) -> float:
+    if t in df.index:
+        return float(df.loc[t, "stage_ft"])
+    idx = df.index.get_indexer([t], method="nearest", tolerance=tolerance)
+    if idx[0] == -1:
+        return np.nan
+    return float(df.iloc[idx[0]]["stage_ft"])
+
+
+def feature_rows(stage_df: pd.DataFrame, events: pd.DataFrame, lid: str, sample_interval: str = "1h") -> pd.DataFrame:
     df = prep_stage(stage_df).set_index("datetime")
-    rows = []
+    rows: list[dict[str, Any]] = []
+
     for _, ev in events.iterrows():
         event_id = ev["event_id"]
         crest_time = pd.to_datetime(ev["crest_time"], utc=True)
@@ -294,110 +480,206 @@ def feature_rows(stage_df: pd.DataFrame, events: pd.DataFrame, lid: str) -> pd.D
         window = df[(df.index >= rise_start) & (df.index < crest_time)].copy()
         if window.empty:
             continue
-        # hourly samples make training less dominated by 15-min autocorrelation
-        sample_times = window.resample("1h").nearest().dropna().index
+
+        sample_times = window.resample(sample_interval).nearest().dropna().index
         for t in sample_times:
-            stage = float(df.loc[t, "stage_ft"])
+            stage = nearest_stage_at(df, t)
+            if pd.isna(stage):
+                continue
+
             def rate(hours: int) -> float:
-                t0 = t - pd.Timedelta(hours=hours)
-                if t0 not in df.index:
-                    # nearest within 30 min
-                    idx = df.index.get_indexer([t0], method="nearest", tolerance=pd.Timedelta(minutes=30))
-                    if idx[0] == -1:
-                        return np.nan
-                    past = float(df.iloc[idx[0]]["stage_ft"])
-                else:
-                    past = float(df.loc[t0, "stage_ft"])
-                return (stage - past) / hours
+                past = nearest_stage_at(df, t - pd.Timedelta(hours=hours))
+                return np.nan if pd.isna(past) else (stage - past) / hours
+
             r1, r3, r6, r12 = rate(1), rate(3), rate(6), rate(12)
             remaining = crest - stage
             if remaining < -0.05:
                 continue
-            rows.append({
-                "lid": lid,
-                "event_id": event_id,
-                "datetime": t,
-                "stage_ft": stage,
-                "h0_stage_ft": h0,
-                "elapsed_hr_since_rise_start": (t - rise_start).total_seconds() / 3600,
-                "r1_ft_per_hr": r1,
-                "r3_ft_per_hr": r3,
-                "r6_ft_per_hr": r6,
-                "r12_ft_per_hr": r12,
-                "momentum_r1_minus_r3": r1 - r3 if pd.notna(r1) and pd.notna(r3) else np.nan,
-                "momentum_r3_minus_r6": r3 - r6 if pd.notna(r3) and pd.notna(r6) else np.nan,
-                "stage_above_h0_ft": stage - h0,
-                "remaining_rise_ft": remaining,
-                "observed_crest_stage_ft": crest,
-            })
+
+            rows.append(
+                {
+                    "lid": lid,
+                    "event_id": event_id,
+                    "datetime": t,
+                    "stage_ft": stage,
+                    "h0_stage_ft": h0,
+                    "elapsed_hr_since_rise_start": (t - rise_start).total_seconds() / 3600,
+                    "r1_ft_per_hr": r1,
+                    "r3_ft_per_hr": r3,
+                    "r6_ft_per_hr": r6,
+                    "r12_ft_per_hr": r12,
+                    "momentum_r1_minus_r3": r1 - r3 if pd.notna(r1) and pd.notna(r3) else np.nan,
+                    "momentum_r3_minus_r6": r3 - r6 if pd.notna(r3) and pd.notna(r6) else np.nan,
+                    "stage_above_h0_ft": stage - h0,
+                    "remaining_rise_ft": remaining,
+                    "observed_crest_stage_ft": crest,
+                    "hours_to_crest": (crest_time - t).total_seconds() / 3600,
+                }
+            )
+
     out = pd.DataFrame(rows)
-    return out.dropna(subset=FEATURES + ["remaining_rise_ft"])
+    if out.empty:
+        return out
+    return out.dropna(subset=FEATURES + ["remaining_rise_ft"]).reset_index(drop=True)
 
 
-def train_one_lid(lid: str, stage_df: pd.DataFrame) -> dict[str, Any] | None:
-    events = detect_events(stage_df)
+def original_scale_equation(model: Pipeline) -> dict[str, Any]:
+    ridge = model.named_steps["ridge"]
+    scaler = model.named_steps["scale"]
+    coefs_orig = ridge.coef_ / scaler.scale_
+    intercept_orig = ridge.intercept_ - np.sum(ridge.coef_ * scaler.mean_ / scaler.scale_)
+    return {
+        "intercept": float(intercept_orig),
+        "coefficients": {feat: float(coef) for feat, coef in zip(FEATURES, coefs_orig)},
+        "formula": "remaining_rise_ft = max(0, intercept + SUM(coef_i * feature_i)); crest = current_stage + remaining_rise",
+    }
+
+
+def safe_r2(obs: np.ndarray, pred: np.ndarray) -> float:
+    if len(obs) < 2 or len(set(np.round(obs, 6))) < 2:
+        return float("nan")
+    return float(r2_score(obs, pred))
+
+
+def residual_stats(error_ft: pd.Series) -> dict[str, float]:
+    err = pd.to_numeric(error_ft, errors="coerce").dropna()
+    if err.empty:
+        return {}
+    under = (-err).clip(lower=0)
+    return {
+        "error_p10_ft": float(err.quantile(0.10)),
+        "error_p50_ft": float(err.quantile(0.50)),
+        "error_p90_ft": float(err.quantile(0.90)),
+        "underforecast_p75_ft": float(under.quantile(0.75)),
+        "underforecast_p90_ft": float(under.quantile(0.90)),
+        "abs_error_p75_ft": float(err.abs().quantile(0.75)),
+        "abs_error_p90_ft": float(err.abs().quantile(0.90)),
+    }
+
+
+def train_one_lid(lid: str, stage_df: pd.DataFrame, site_row: pd.Series | dict[str, Any], settings: EventSettings) -> dict[str, Any]:
+    events = detect_events(stage_df, site_row=site_row, settings=settings)
+    event_out = DATA_PROCESSED / f"{lid}_events.csv"
+    train_out = DATA_PROCESSED / f"{lid}_training_rows.csv"
+    scored_out = DATA_PROCESSED / f"{lid}_training_rows_scored.csv"
+
     if events.empty or len(events) < 5:
-        return {"lid": lid, "status": "too_few_events", "event_count": len(events)}
-    events.to_csv(DATA_PROCESSED / f"{lid}_events.csv", index=False)
-    train = feature_rows(stage_df, events, lid)
-    train.to_csv(DATA_PROCESSED / f"{lid}_training_rows.csv", index=False)
+        events.to_csv(event_out, index=False)
+        return {"lid": lid, "status": "too_few_events", "event_count": int(len(events))}
+
+    events.to_csv(event_out, index=False)
+    train = feature_rows(stage_df, events, lid, sample_interval=settings.sample_interval)
+    train.to_csv(train_out, index=False)
+
     if len(train) < 40 or train["event_id"].nunique() < 5:
-        return {"lid": lid, "status": "too_few_training_rows", "event_count": len(events), "rows": len(train)}
+        return {
+            "lid": lid,
+            "status": "too_few_training_rows",
+            "event_count": int(len(events)),
+            "training_rows": int(len(train)),
+        }
 
     X = train[FEATURES]
     y = train["remaining_rise_ft"].clip(lower=0)
     groups = train["event_id"]
 
-    splitter = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=42)
-    train_idx, test_idx = next(splitter.split(X, y, groups=groups))
-    model = Pipeline([
-        ("scale", StandardScaler()),
-        ("ridge", RidgeCV(alphas=[0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0])),
-    ])
-    model.fit(X.iloc[train_idx], y.iloc[train_idx])
-    pred = np.maximum(0, model.predict(X.iloc[test_idx]))
-    obs = y.iloc[test_idx].to_numpy()
+    model = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("ridge", RidgeCV(alphas=[0.03, 0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0])),
+        ]
+    )
 
-    full_pred = np.maximum(0, model.predict(X))
-    train["pred_remaining_rise_ft"] = full_pred
+    if train["event_id"].nunique() >= 7:
+        splitter = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=42)
+        train_idx, test_idx = next(splitter.split(X, y, groups=groups))
+        model.fit(X.iloc[train_idx], y.iloc[train_idx])
+        test_pred_remaining = np.maximum(0, model.predict(X.iloc[test_idx]))
+        test_obs_remaining = y.iloc[test_idx].to_numpy()
+        holdout_rows = len(test_idx)
+        holdout_events = int(train.iloc[test_idx]["event_id"].nunique())
+        mae = float(mean_absolute_error(test_obs_remaining, test_pred_remaining))
+        rmse = float(math.sqrt(mean_squared_error(test_obs_remaining, test_pred_remaining)))
+        bias = float(np.mean(test_pred_remaining - test_obs_remaining))
+        r2 = safe_r2(test_obs_remaining, test_pred_remaining)
+    else:
+        model.fit(X, y)
+        pred_remaining = np.maximum(0, model.predict(X))
+        obs_remaining = y.to_numpy()
+        holdout_rows = 0
+        holdout_events = 0
+        mae = float(mean_absolute_error(obs_remaining, pred_remaining))
+        rmse = float(math.sqrt(mean_squared_error(obs_remaining, pred_remaining)))
+        bias = float(np.mean(pred_remaining - obs_remaining))
+        r2 = safe_r2(obs_remaining, pred_remaining)
+
+    model.fit(X, y)
+    full_pred_remaining = np.maximum(0, model.predict(X))
+    train["pred_remaining_rise_ft"] = full_pred_remaining
     train["pred_crest_stage_ft"] = train["stage_ft"] + train["pred_remaining_rise_ft"]
     train["error_ft"] = train["pred_crest_stage_ft"] - train["observed_crest_stage_ft"]
-    train.to_csv(DATA_PROCESSED / f"{lid}_training_rows_scored.csv", index=False)
+    train.to_csv(scored_out, index=False)
 
-    joblib.dump({"lid": lid, "features": FEATURES, "model": model}, MODEL_DIR / f"{lid}_ridge_model.joblib")
-
-    ridge = model.named_steps["ridge"]
-    scaler = model.named_steps["scale"]
-    # Convert standardized coefficients back to original feature units.
-    coefs_orig = ridge.coef_ / scaler.scale_
-    intercept_orig = ridge.intercept_ - np.sum(ridge.coef_ * scaler.mean_ / scaler.scale_)
-    equation = {
-        "intercept": float(intercept_orig),
-        "coefficients": {feat: float(coef) for feat, coef in zip(FEATURES, coefs_orig)},
-        "formula": "remaining_rise_ft = max(0, intercept + SUM(coef_i * feature_i)); crest = current_stage + remaining_rise",
+    eq = original_scale_equation(model)
+    resid = residual_stats(train["error_ft"])
+    metadata = {
+        "lid": lid,
+        "name": site_row.get("name", "") if isinstance(site_row, dict) else site_row.get("name", ""),
+        "features": FEATURES,
+        "event_settings": settings.__dict__,
+        "training_rows": int(len(train)),
+        "event_count": int(events["event_id"].nunique()),
+        "skill": {
+            "mae_ft": mae,
+            "rmse_ft": rmse,
+            "bias_ft": bias,
+            "r2": r2,
+            "holdout_rows": holdout_rows,
+            "holdout_events": holdout_events,
+            **resid,
+        },
+        "equation": eq,
     }
+
+    joblib.dump({"lid": lid, "features": FEATURES, "model": model, "metadata": metadata}, MODEL_DIR / f"{lid}_ridge_model.joblib")
     with open(REPORT_DIR / f"{lid}_equation.json", "w", encoding="utf-8") as f:
-        json.dump(equation, f, indent=2)
+        json.dump(metadata, f, indent=2)
 
     return {
         "lid": lid,
         "status": "ok",
         "event_count": int(events["event_id"].nunique()),
         "training_rows": int(len(train)),
-        "test_rows": int(len(test_idx)),
-        "mae_ft": float(mean_absolute_error(obs, pred)),
-        "rmse_ft": float(math.sqrt(mean_squared_error(obs, pred))),
-        "bias_ft": float(np.mean(pred - obs)),
-        "r2": float(r2_score(obs, pred)) if len(set(obs)) > 1 else np.nan,
+        "holdout_rows": holdout_rows,
+        "holdout_events": holdout_events,
+        "mae_ft": mae,
+        "rmse_ft": rmse,
+        "bias_ft": bias,
+        "r2": r2,
+        **resid,
         "equation_file": str(REPORT_DIR / f"{lid}_equation.json"),
         "model_file": str(MODEL_DIR / f"{lid}_ridge_model.joblib"),
     }
 
 
+def build_event_settings(args: argparse.Namespace) -> EventSettings:
+    return EventSettings(
+        min_total_rise_ft=args.min_total_rise,
+        below_threshold_hours_to_end=args.below_hours,
+        pre_crest_lookback_hours=args.h0_lookback_hours,
+        include_pre_event_hours=args.pre_event_hours,
+        sample_interval=args.sample_interval,
+    )
+
+
 def command_train(args: argparse.Namespace) -> None:
     ensure_dirs()
     sites = read_sites(args.sites)
-    summaries = []
+    if args.limit:
+        sites = sites.head(args.limit)
+    settings = build_event_settings(args)
+    summaries: list[dict[str, Any]] = []
+
     for _, row in sites.iterrows():
         lid = row["lid"]
         raw = DATA_RAW / f"{lid}_usgs_stage.csv"
@@ -406,21 +688,45 @@ def command_train(args: argparse.Namespace) -> None:
             continue
         print(f"Training {lid}...")
         stage_df = pd.read_csv(raw)
-        result = train_one_lid(lid, stage_df)
-        if result:
-            summaries.append(result)
-            print(f"  {result}")
+        result = train_one_lid(lid, stage_df, row, settings)
+        summaries.append(result)
+        print(f"  {result}")
+
     summary = pd.DataFrame(summaries)
-    summary.to_csv(REPORT_DIR / "model_summary.csv", index=False)
-    print(f"\nWrote {REPORT_DIR / 'model_summary.csv'}")
+    summary_out = REPORT_DIR / "model_summary.csv"
+    summary.to_csv(summary_out, index=False)
+    print(f"\nWrote {summary_out}")
 
 
-def command_forecast(args: argparse.Namespace) -> None:
-    lid = args.lid.upper()
+def forecast_from_features(lid: str, row: dict[str, float]) -> dict[str, Any]:
     model_path = MODEL_DIR / f"{lid}_ridge_model.joblib"
     if not model_path.exists():
         raise FileNotFoundError(f"No model found for {lid}: {model_path}")
     bundle = joblib.load(model_path)
+    X = pd.DataFrame([row])[FEATURES]
+    remaining = max(0.0, float(bundle["model"].predict(X)[0]))
+    likely_crest = row["stage_ft"] + remaining
+    metadata = bundle.get("metadata", {})
+    skill = metadata.get("skill", {})
+    mae = float(skill.get("mae_ft", 0.0) or 0.0)
+    under75 = float(skill.get("underforecast_p75_ft", mae) or mae)
+    under90 = float(skill.get("underforecast_p90_ft", max(mae, under75)) or max(mae, under75))
+
+    return {
+        "lid": lid,
+        "current_stage_ft": round(row["stage_ft"], 2),
+        "pred_remaining_rise_ft": round(remaining, 2),
+        "pred_crest_stage_ft": round(likely_crest, 2),
+        "low_reasonable_crest_ft": round(max(row["stage_ft"], likely_crest - mae), 2),
+        "conservative_crest_ft": round(likely_crest + max(mae, under75), 2),
+        "high_conservative_crest_ft": round(likely_crest + max(mae, under90), 2),
+        "skill_used": {k: skill.get(k) for k in ["mae_ft", "rmse_ft", "bias_ft", "r2", "underforecast_p75_ft", "underforecast_p90_ft"]},
+        "inputs": row,
+    }
+
+
+def command_forecast(args: argparse.Namespace) -> None:
+    lid = args.lid.upper()
     row = {
         "stage_ft": args.stage,
         "h0_stage_ft": args.h0,
@@ -433,38 +739,159 @@ def command_forecast(args: argparse.Namespace) -> None:
         "momentum_r3_minus_r6": args.r3 - args.r6,
         "stage_above_h0_ft": args.stage - args.h0,
     }
-    X = pd.DataFrame([row])[FEATURES]
-    remaining = max(0.0, float(bundle["model"].predict(X)[0]))
-    crest = args.stage + remaining
-    print(json.dumps({
-        "lid": lid,
-        "current_stage_ft": args.stage,
-        "pred_remaining_rise_ft": round(remaining, 2),
-        "pred_crest_stage_ft": round(crest, 2),
-        "inputs": row,
-    }, indent=2))
+    print(json.dumps(forecast_from_features(lid, row), indent=2))
+
+
+def infer_latest_features(stage_df: pd.DataFrame, h0_lookback_hours: float = 72.0) -> dict[str, float]:
+    df = prep_stage(stage_df).set_index("datetime")
+    if df.empty:
+        raise ValueError("No usable stage data")
+    now = df.index.max()
+    stage = nearest_stage_at(df, now)
+    h0_window = df[df.index >= now - pd.Timedelta(hours=h0_lookback_hours)]
+    if h0_window.empty:
+        h0_window = df
+    h0_idx = h0_window["stage_ft"].idxmin()
+    h0 = float(h0_window.loc[h0_idx, "stage_ft"])
+    elapsed = max(0.0, (now - h0_idx).total_seconds() / 3600)
+
+    def rate(hours: int) -> float:
+        past = nearest_stage_at(df, now - pd.Timedelta(hours=hours), tolerance=pd.Timedelta(minutes=45))
+        return np.nan if pd.isna(past) else (stage - past) / hours
+
+    r1, r3, r6, r12 = rate(1), rate(3), rate(6), rate(12)
+    if any(pd.isna(x) for x in [r1, r3, r6, r12]):
+        raise ValueError("Could not compute all rates from latest data; need at least 12 hours of recent data")
+
+    return {
+        "stage_ft": float(stage),
+        "h0_stage_ft": h0,
+        "elapsed_hr_since_rise_start": float(elapsed),
+        "r1_ft_per_hr": float(r1),
+        "r3_ft_per_hr": float(r3),
+        "r6_ft_per_hr": float(r6),
+        "r12_ft_per_hr": float(r12),
+        "momentum_r1_minus_r3": float(r1 - r3),
+        "momentum_r3_minus_r6": float(r3 - r6),
+        "stage_above_h0_ft": float(stage - h0),
+    }
+
+
+def command_forecast_latest(args: argparse.Namespace) -> None:
+    lid = args.lid.upper()
+    raw = DATA_RAW / f"{lid}_usgs_stage.csv"
+    if not raw.exists():
+        raise FileNotFoundError(f"Missing {raw}. Run download first.")
+    stage_df = pd.read_csv(raw)
+    features = infer_latest_features(stage_df, h0_lookback_hours=args.h0_lookback_hours)
+    print(json.dumps(forecast_from_features(lid, features), indent=2))
+
+
+def command_status(args: argparse.Namespace) -> None:
+    ensure_dirs()
+    sites = read_sites(args.sites)
+    rows: list[dict[str, Any]] = []
+    for _, row in sites.iterrows():
+        lid = row["lid"]
+        raw = DATA_RAW / f"{lid}_usgs_stage.csv"
+        model = MODEL_DIR / f"{lid}_ridge_model.joblib"
+        raw_rows: int | str = ""
+        start = ""
+        end = ""
+        if raw.exists():
+            try:
+                df = pd.read_csv(raw, usecols=["datetime", "stage_ft"])
+                raw_rows = len(df)
+                dt = pd.to_datetime(df["datetime"], utc=True, errors="coerce").dropna()
+                if not dt.empty:
+                    start = dt.min().date().isoformat()
+                    end = dt.max().date().isoformat()
+            except Exception as exc:  # noqa: BLE001
+                raw_rows = f"error: {exc}"
+        rows.append(
+            {
+                "lid": lid,
+                "name": row["name"],
+                "usgs_site": row.get("usgs_site", ""),
+                "has_raw": raw.exists(),
+                "raw_rows": raw_rows,
+                "raw_start": start,
+                "raw_end": end,
+                "has_model": model.exists(),
+            }
+        )
+    out = pd.DataFrame(rows)
+    status_out = REPORT_DIR / "repo_status.csv"
+    out.to_csv(status_out, index=False)
+    print(out.to_string(index=False))
+    print(f"\nWrote {status_out}")
+
+
+def command_run_all(args: argparse.Namespace) -> None:
+    discover_args = argparse.Namespace(sites=args.sites, output=args.discovered_sites)
+    command_discover_sites(discover_args)
+
+    download_args = argparse.Namespace(
+        sites=args.discovered_sites,
+        years=args.years,
+        start=args.start,
+        end=args.end,
+        limit=args.limit,
+        chunk_months=args.chunk_months,
+        sleep_seconds=args.sleep_seconds,
+        skip_existing=args.skip_existing,
+        force=args.force,
+    )
+    command_download(download_args)
+
+    train_args = argparse.Namespace(
+        sites=args.discovered_sites,
+        limit=args.limit,
+        min_total_rise=args.min_total_rise,
+        below_hours=args.below_hours,
+        h0_lookback_hours=args.h0_lookback_hours,
+        pre_event_hours=args.pre_event_hours,
+        sample_interval=args.sample_interval,
+    )
+    command_train(train_args)
+
+
+def add_event_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--min-total-rise", type=float, default=1.0, help="Minimum rise from H0 to crest to count as an event")
+    parser.add_argument("--below-hours", type=float, default=24.0, help="Hours below threshold required to end an event")
+    parser.add_argument("--h0-lookback-hours", type=float, default=48.0, help="Lookback from crest to search for rise-start/H0")
+    parser.add_argument("--pre-event-hours", type=float, default=24.0, help="Hours before threshold crossing to include in event")
+    parser.add_argument("--sample-interval", default="1h", help="Training sample interval inside each event")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Build multi-gage river crest models from USGS historical stage data.")
+    p = argparse.ArgumentParser(description="Build multi-gage river crest models from historical stage data.")
     sub = p.add_subparsers(dest="command", required=True)
 
     ps = sub.add_parser("discover-sites", help="Try to map NWS LIDs to USGS site IDs using NWPS metadata")
     ps.add_argument("--sites", default=str(ROOT / "config" / "sites.csv"))
     ps.add_argument("--output", default=str(ROOT / "config" / "sites_with_usgs.csv"))
-    ps.set_defaults(func=discover_sites)
+    ps.set_defaults(func=command_discover_sites)
 
-    pdn = sub.add_parser("download", help="Download historical USGS gage height data")
+    pdn = sub.add_parser("download", help="Download historical USGS gage-height data")
     pdn.add_argument("--sites", default=str(ROOT / "config" / "sites_with_usgs.csv"))
     pdn.add_argument("--years", type=int, default=15)
+    pdn.add_argument("--start", default="", help="Optional YYYY-MM-DD UTC start date")
+    pdn.add_argument("--end", default="", help="Optional YYYY-MM-DD UTC end date")
+    pdn.add_argument("--limit", type=int, default=0, help="Only process first N sites; useful for smoke tests")
+    pdn.add_argument("--chunk-months", type=int, default=12)
+    pdn.add_argument("--sleep-seconds", type=float, default=0.1)
+    pdn.add_argument("--skip-existing", action="store_true", help="Do not re-download files that already exist")
+    pdn.add_argument("--force", action="store_true", help="Force re-download even if file exists")
     pdn.set_defaults(func=command_download)
 
     pt = sub.add_parser("train", help="Detect events and train station-specific models")
     pt.add_argument("--sites", default=str(ROOT / "config" / "sites_with_usgs.csv"))
-    pt.add_argument("--years", type=int, default=15)  # kept for future compatibility
+    pt.add_argument("--limit", type=int, default=0, help="Only process first N sites")
+    add_event_args(pt)
     pt.set_defaults(func=command_train)
 
-    pf = sub.add_parser("forecast", help="Forecast crest from current hydrologic features")
+    pf = sub.add_parser("forecast", help="Forecast crest from manually supplied current hydrologic features")
     pf.add_argument("--lid", required=True)
     pf.add_argument("--stage", type=float, required=True)
     pf.add_argument("--h0", type=float, required=True)
@@ -474,6 +901,30 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--r6", type=float, required=True)
     pf.add_argument("--r12", type=float, required=True)
     pf.set_defaults(func=command_forecast)
+
+    pfl = sub.add_parser("forecast-latest", help="Infer latest features from downloaded data and forecast")
+    pfl.add_argument("--lid", required=True)
+    pfl.add_argument("--h0-lookback-hours", type=float, default=72.0)
+    pfl.set_defaults(func=command_forecast_latest)
+
+    pst = sub.add_parser("status", help="Show mapping/data/model status by LID")
+    pst.add_argument("--sites", default=str(ROOT / "config" / "sites_with_usgs.csv"))
+    pst.set_defaults(func=command_status)
+
+    pra = sub.add_parser("run-all", help="Discover sites, download data, and train models")
+    pra.add_argument("--sites", default=str(ROOT / "config" / "sites.csv"))
+    pra.add_argument("--discovered-sites", default=str(ROOT / "config" / "sites_with_usgs.csv"))
+    pra.add_argument("--years", type=int, default=15)
+    pra.add_argument("--start", default="")
+    pra.add_argument("--end", default="")
+    pra.add_argument("--limit", type=int, default=0)
+    pra.add_argument("--chunk-months", type=int, default=12)
+    pra.add_argument("--sleep-seconds", type=float, default=0.1)
+    pra.add_argument("--skip-existing", action="store_true")
+    pra.add_argument("--force", action="store_true")
+    add_event_args(pra)
+    pra.set_defaults(func=command_run_all)
+
     return p
 
 
