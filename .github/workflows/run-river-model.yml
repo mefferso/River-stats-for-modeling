@@ -11,6 +11,7 @@ on:
         options:
           - smoke
           - discover
+          - thresholds
           - download
           - train
           - run-all
@@ -23,6 +24,21 @@ on:
         description: Only first N sites; 0 means all sites
         required: true
         default: '1'
+      event_set:
+        description: Event set to train
+        required: true
+        default: flood
+        type: choice
+        options:
+          - flood
+          - moderate
+          - major
+          - all
+          - custom
+      min_crest_stage:
+        description: Optional explicit minimum crest stage; blank uses event_set threshold columns
+        required: false
+        default: ''
       force_download:
         description: Re-download even if raw CSV exists in the runner
         required: true
@@ -52,6 +68,8 @@ jobs:
           MODE: ${{ inputs.mode }}
           YEARS: ${{ inputs.years }}
           LIMIT: ${{ inputs.limit }}
+          EVENT_SET: ${{ inputs.event_set }}
+          MIN_CREST_STAGE: ${{ inputs.min_crest_stage }}
           FORCE_DOWNLOAD: ${{ inputs.force_download }}
         run: |
           python - <<'PY'
@@ -61,6 +79,8 @@ jobs:
           mode = os.environ['MODE']
           years = int(os.environ['YEARS'])
           limit = int(os.environ['LIMIT'])
+          event_set = os.environ['EVENT_SET']
+          min_crest_stage = os.environ.get('MIN_CREST_STAGE', '').strip()
           force = os.environ['FORCE_DOWNLOAD'].lower() == 'true'
 
           if years < 1 or years > 30:
@@ -78,27 +98,38 @@ jobs:
               return cmd
 
           force_arg = ['--force'] if force else ['--skip-existing']
+          crest_arg = ['--min-crest-stage', min_crest_stage] if min_crest_stage else []
 
           discover = ['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', 'config/sites_with_usgs.csv']
+          thresholds = ['python', 'src/crest_eventset_train.py', 'discover-thresholds', '--sites', 'config/sites_with_usgs.csv', '--output', 'config/sites_with_usgs.csv']
           download = ['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', years] + force_arg
-          train = ['python', 'src/nwps_multigage_model.py', 'train', '--sites', 'config/sites_with_usgs.csv']
+          train = ['python', 'src/crest_eventset_train.py', 'train', '--sites', 'config/sites_with_usgs.csv', '--event-set', event_set] + crest_arg
 
           if mode == 'smoke':
               run(discover)
+              run(thresholds)
               run(with_limit(['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', 1] + force_arg))
               run(with_limit(train))
               run(['python', 'src/nwps_multigage_model.py', 'status', '--sites', 'config/sites_with_usgs.csv'])
           elif mode == 'discover':
               run(discover)
+          elif mode == 'thresholds':
+              run(discover)
+              run(thresholds)
           elif mode == 'download':
               run(discover)
+              run(thresholds)
               run(with_limit(download))
           elif mode == 'train':
               run(discover)
+              run(thresholds)
               run(with_limit(download))
               run(with_limit(train))
           elif mode == 'run-all':
-              run(with_limit(['python', 'src/nwps_multigage_model.py', 'run-all', '--sites', 'config/sites.csv', '--years', years] + force_arg))
+              run(discover)
+              run(thresholds)
+              run(with_limit(download))
+              run(with_limit(train))
           elif mode == 'status':
               site_file = 'config/sites_with_usgs.csv' if os.path.exists('config/sites_with_usgs.csv') else 'config/sites.csv'
               run(['python', 'src/nwps_multigage_model.py', 'status', '--sites', site_file])
