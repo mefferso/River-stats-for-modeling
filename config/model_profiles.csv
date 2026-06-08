@@ -1,10 +1,10 @@
 lid,recommended_event_set,recommended_min_crest_stage_ft,reason
-DARL1,custom,12,lower sparse-gage retest threshold after action-plus had too few events
-MAGL1,custom,43,lower sparse-gage retest threshold after action-plus had too few events
+DARL1,skip,,insufficient historical events even after custom threshold retest
+MAGL1,skip,,insufficient historical events even after custom threshold retest
 DENL1,flood,,strong flood-plus baseline
 BYML1,skip,,no USGS/raw mapping yet
 PVLL1,flood,,use flood-plus baseline
-OLVL1,custom,12,lower sparse-gage retest threshold after action-plus had too few events
+OLVL1,skip,,insufficient historical events even after custom threshold retest
 CMTL1,flood,,moderate not selected yet; flood-plus baseline needs review for bias
 LPOL1,flood,,flood-plus strong; moderate has too few events despite good score
 MONL1,flood,,use flood-plus baseline
