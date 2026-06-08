@@ -1,0 +1,8 @@
+lid,min_forecast_stage_ft,early_window_ft,min_stage_rise_ft,min_r3_rise_rate,max_remaining_rise_ft,notes
+CUSL1,18,1.5,1.0,0.10,,Do not forecast Tchefuncte Covington until near action stage or clearly rising hard
+HOLL1,14,1.5,1.0,0.10,,Do not forecast Holden from low baseflow rises
+AMIL1,18,1.5,1.0,0.10,,Custom model but require near action stage before showing forecast
+CMTL1,16,1.5,1.0,0.10,,Bias-prone model; require near action stage
+KENL1,12,1.5,1.0,0.10,,Sparse model; require near action stage
+NRBL1,15,1.5,1.0,0.10,,Sparse model; require near action stage
+PVLL1,7,1.5,1.0,0.10,,Sparse model; require near action stage
