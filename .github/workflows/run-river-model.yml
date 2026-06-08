@@ -16,7 +16,7 @@ on:
           - run-all
           - status
       years:
-        description: Years of USGS data for download/run-all
+        description: Years of USGS data for download/train/run-all
         required: true
         default: '15'
       limit:
@@ -79,17 +79,24 @@ jobs:
 
           force_arg = ['--force'] if force else ['--skip-existing']
 
+          discover = ['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', 'config/sites_with_usgs.csv']
+          download = ['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', years] + force_arg
+          train = ['python', 'src/nwps_multigage_model.py', 'train', '--sites', 'config/sites_with_usgs.csv']
+
           if mode == 'smoke':
-              run(['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', 'config/sites_with_usgs.csv'])
+              run(discover)
               run(with_limit(['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', 1] + force_arg))
-              run(with_limit(['python', 'src/nwps_multigage_model.py', 'train', '--sites', 'config/sites_with_usgs.csv']))
+              run(with_limit(train))
               run(['python', 'src/nwps_multigage_model.py', 'status', '--sites', 'config/sites_with_usgs.csv'])
           elif mode == 'discover':
-              run(['python', 'src/nwps_multigage_model.py', 'discover-sites', '--sites', 'config/sites.csv', '--output', 'config/sites_with_usgs.csv'])
+              run(discover)
           elif mode == 'download':
-              run(with_limit(['python', 'src/nwps_multigage_model.py', 'download', '--sites', 'config/sites_with_usgs.csv', '--years', years] + force_arg))
+              run(discover)
+              run(with_limit(download))
           elif mode == 'train':
-              run(with_limit(['python', 'src/nwps_multigage_model.py', 'train', '--sites', 'config/sites_with_usgs.csv']))
+              run(discover)
+              run(with_limit(download))
+              run(with_limit(train))
           elif mode == 'run-all':
               run(with_limit(['python', 'src/nwps_multigage_model.py', 'run-all', '--sites', 'config/sites.csv', '--years', years] + force_arg))
           elif mode == 'status':
