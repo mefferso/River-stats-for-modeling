@@ -24,7 +24,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile source
-        run: python -m py_compile src/nwps_multigage_model.py
+        run: |
+          python -m py_compile src/nwps_multigage_model.py
+          python -m py_compile src/crest_eventset_train.py
 
       - name: Show CLI help
-        run: python src/nwps_multigage_model.py --help
+        run: |
+          python src/nwps_multigage_model.py --help
+          python src/crest_eventset_train.py --help
