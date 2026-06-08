@@ -27,8 +27,14 @@ jobs:
         run: |
           python -m py_compile src/nwps_multigage_model.py
           python -m py_compile src/crest_eventset_train.py
+          python -m py_compile src/filter_sites.py
+          python -m py_compile src/model_status.py
+          python -m py_compile src/train_model_profiles.py
 
       - name: Show CLI help
         run: |
           python src/nwps_multigage_model.py --help
           python src/crest_eventset_train.py --help
+          python src/filter_sites.py --help
+          python src/model_status.py --help
+          python src/train_model_profiles.py --help
