@@ -53,6 +53,9 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -180,6 +183,23 @@ jobs:
           else:
               raise SystemExit(f'Unknown mode: {mode}')
           PY
+
+      - name: Publish dashboard data to GitHub Pages source
+        if: ${{ inputs.mode == 'profile-forecast' || inputs.mode == 'forecast-only' }}
+        run: |
+          if [ ! -f docs/latest_forecasts.json ]; then
+            echo "No docs/latest_forecasts.json to publish"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html docs/latest_forecasts.json docs/forecast_dashboard.html
+          if git diff --cached --quiet; then
+            echo "No dashboard changes to commit"
+          else
+            git commit -m "Update river forecast dashboard data"
+            git push
+          fi
 
       - name: Upload outputs
         if: always()
