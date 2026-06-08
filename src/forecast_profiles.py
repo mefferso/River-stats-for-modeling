@@ -52,6 +52,10 @@ def clean(value: Any) -> Any:
         return round(value, 3)
     if isinstance(value, pd.Timestamp):
         return value.isoformat()
+    if isinstance(value, dict):
+        return {k: clean(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [clean(v) for v in value]
     return value
 
 
@@ -137,7 +141,7 @@ def confidence_bucket(status: str, profile: dict[str, Any]) -> str:
     return "low"
 
 
-def profile_label(profile: pd.Series) -> tuple[str, float | None, str]:
+def profile_label(profile: pd.Series | dict[str, Any]) -> tuple[str, float | None, str]:
     event_set = str(profile.get("recommended_event_set", "")).lower().strip()
     min_crest = event_train.as_float(profile.get("recommended_min_crest_stage_ft", ""))
     settings = event_train.EventSetSettings(event_set=event_set, min_crest_stage=min_crest)
@@ -261,22 +265,20 @@ def forecast_one(
         row.update({"forecast_status": "inactive", "forecast_note": active_note, "confidence": "none"})
         return row
 
-    features = pd.DataFrame(
-        [
-            {
-                "stage_ft": current_stage,
-                "h0_stage_ft": h0_stage,
-                "elapsed_hr_since_rise_start": elapsed,
-                "r1_ft_per_hr": r1,
-                "r3_ft_per_hr": r3,
-                "r6_ft_per_hr": r6,
-                "r12_ft_per_hr": r12,
-                "momentum_r1_minus_r3": r1 - r3,
-                "momentum_r3_minus_r6": r3 - r6,
-                "stage_above_h0_ft": current_stage - h0_stage,
-            }
-        ]
-    )
+    features = pd.DataFrame([
+        {
+            "stage_ft": current_stage,
+            "h0_stage_ft": h0_stage,
+            "elapsed_hr_since_rise_start": elapsed,
+            "r1_ft_per_hr": r1,
+            "r3_ft_per_hr": r3,
+            "r6_ft_per_hr": r6,
+            "r12_ft_per_hr": r12,
+            "momentum_r1_minus_r3": r1 - r3,
+            "momentum_r3_minus_r6": r3 - r6,
+            "stage_above_h0_ft": current_stage - h0_stage,
+        }
+    ])
 
     bundle = joblib.load(model_file)
     model = bundle["model"]
@@ -312,7 +314,48 @@ def forecast_one(
     return row
 
 
-def build_outputs(rows: list[dict[str, Any]], output_csv: Path, output_json: Path, docs_json: Path) -> None:
+def manual_model_payload(
+    sites: pd.DataFrame,
+    profiles: pd.DataFrame,
+    skill_by_lid: dict[str, dict[str, Any]],
+    overrides_by_lid: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    site_by_lid = {str(row["lid"]).upper(): row for _, row in sites.iterrows()}
+    models: dict[str, Any] = {}
+    for _, profile in profiles.iterrows():
+        lid = str(profile["lid"]).upper()
+        event_set, _min_crest, label = profile_label(profile)
+        skill = skill_by_lid.get(lid, {})
+        overrides = overrides_by_lid.get(lid, {})
+        site = site_by_lid.get(lid, {})
+        model_file = base.MODEL_DIR / f"{lid}_{label}_ridge_model.joblib"
+        item: dict[str, Any] = {
+            "lid": lid,
+            "name": site.get("name", "") if hasattr(site, "get") else "",
+            "run_label": label if event_set != "skip" else "skip",
+            "event_set": event_set,
+            "status": skill.get("status", "skipped" if event_set == "skip" else "missing_model"),
+            "profile_reason": profile.get("reason", ""),
+            "skill": {k: clean(v) for k, v in skill.items()},
+            "overrides": {k: clean(v) for k, v in overrides.items()},
+        }
+        if event_set != "skip" and model_file.exists():
+            bundle = joblib.load(model_file)
+            meta = bundle.get("metadata", {})
+            item["status"] = skill.get("status", "ok")
+            item["equation"] = clean(meta.get("equation", {}))
+            item["model_skill"] = clean(meta.get("skill", {}))
+        models[lid] = item
+    return models
+
+
+def build_outputs(
+    rows: list[dict[str, Any]],
+    manual_models: dict[str, Any],
+    output_csv: Path,
+    output_json: Path,
+    docs_json: Path,
+) -> None:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     output_json.parent.mkdir(parents=True, exist_ok=True)
     docs_json.parent.mkdir(parents=True, exist_ok=True)
@@ -323,6 +366,7 @@ def build_outputs(rows: list[dict[str, Any]], output_csv: Path, output_json: Pat
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "count": len(clean_rows),
         "forecasts": clean_rows,
+        "manual_models": clean(manual_models),
     }
     output_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     docs_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -371,7 +415,8 @@ def main() -> None:
         rows.append(row)
         print(f"{lid}: {row.get('forecast_status')} {row.get('run_label')} {row.get('pred_crest_likely_ft', '')}")
 
-    build_outputs(rows, Path(args.output_csv), Path(args.output_json), Path(args.docs_json))
+    models = manual_model_payload(sites, profiles, skill_by_lid, overrides_by_lid)
+    build_outputs(rows, models, Path(args.output_csv), Path(args.output_json), Path(args.docs_json))
 
 
 if __name__ == "__main__":
