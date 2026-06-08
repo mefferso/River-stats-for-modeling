@@ -41,9 +41,13 @@ Generated data/model files are gitignored so the repo does not become a bloated 
 config/
   sites.csv                    # LIDs, USGS IDs, optional thresholds
   sites_with_usgs.csv          # discovered LID-to-USGS mapping
+  model_profiles.csv           # recommended event-set choice per gage
 src/
   nwps_multigage_model.py      # discovery, download, original trainer, forecast/status
-  crest_eventset_train.py      # flood/moderate/major event-set trainer
+  crest_eventset_train.py      # flood/moderate/major/custom event-set trainer
+  train_model_profiles.py      # trains recommended model profile per gage
+  filter_sites.py              # filters sites to selected LIDs
+  model_status.py              # enhanced status report
 data/
   raw/                         # downloaded USGS stage CSVs
   processed/                   # events + training/scored rows
@@ -57,39 +61,13 @@ output/
 
 ---
 
-## Local setup
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-PowerShell may need:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Mac/Linux:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
----
-
-## Recommended workflow
+## Recommended local workflow
 
 ### 1) Discover USGS IDs
 
 ```bash
 python src/nwps_multigage_model.py discover-sites --sites config/sites.csv --output config/sites_with_usgs.csv
 ```
-
-Review `config/sites_with_usgs.csv`. Some LIDs may not auto-map cleanly and need manual USGS IDs.
 
 ### 2) Try to fill flood-category thresholds
 
@@ -107,7 +85,7 @@ moderate_stage_ft
 major_stage_ft
 ```
 
-Review those values before trusting them. The threshold discovery is best-effort because NWPS metadata can be annoyingly inconsistent.
+Review those values before trusting them. Threshold discovery is best-effort because NWPS metadata can be annoyingly inconsistent.
 
 ### 3) Download 15 years of USGS stage data
 
@@ -135,22 +113,24 @@ Moderate-plus events:
 python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set moderate
 ```
 
-Major-plus events:
-
-```bash
-python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set major
-```
-
 Custom minimum crest stage:
 
 ```bash
 python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set custom --min-crest-stage 18
 ```
 
-Smoke test first site only:
+### 5) Train recommended profile models
+
+After comparing flood/moderate/custom performance, use the profile trainer:
 
 ```bash
-python src/crest_eventset_train.py train --sites config/sites_with_usgs.csv --event-set flood --limit 1
+python src/train_model_profiles.py --sites config/sites_with_usgs.csv --profiles config/model_profiles.csv
+```
+
+Selected sparse gages only:
+
+```bash
+python src/train_model_profiles.py --sites config/sites_with_usgs.csv --profiles config/model_profiles.csv --lids DARL1,MAGL1,OLVL1,AMIL1,ORAM6
 ```
 
 ---
@@ -187,23 +167,37 @@ This prevents the model from learning from every little 1-foot wiggle while stil
 
 ---
 
-## Forecast manually
+## Model profiles
 
-The original forecast command still works for models produced by `nwps_multigage_model.py`:
+`config/model_profiles.csv` stores the recommended model strategy per gage.
 
-```bash
-python src/nwps_multigage_model.py forecast --lid MNLM6 --stage 13.8 --h0 12.3 --r1 1.4 --r3 1.1 --r6 0.8 --r12 0.5 --elapsed 4
+Examples:
+
+```text
+DARL1 → custom, min crest 16 ft
+MAGL1 → custom, min crest 47 ft
+CREM6 → moderate-plus
+LYMM6 → moderate-plus
+ROBL1 → flood-plus
+BYML1 → skip until USGS/raw mapping exists
 ```
 
-Event-set forecast wiring will be the next cleanup step after we inspect flood/moderate model summaries.
+The profile trainer writes:
+
+```text
+output/reports/model_profile_summary.csv
+output/reports/model_summary.csv
+```
 
 ---
 
 ## Check status
 
 ```bash
-python src/nwps_multigage_model.py status --sites config/sites_with_usgs.csv
+python src/model_status.py --sites config/sites_with_usgs.csv
 ```
+
+This reports raw data range, latest stage, max stage, and model labels found for each LID.
 
 ---
 
@@ -222,24 +216,35 @@ mode = smoke
 years = 1
 limit = 1
 event_set = flood
+selected_lids = blank
 ```
 
-Then try full flood-plus:
+Full flood-plus:
 
 ```text
 mode = run-all
 years = 15
 limit = 0
 event_set = flood
+selected_lids = blank
 ```
 
-Then compare moderate-plus:
+Selected sparse-gage custom/profile test:
 
 ```text
-mode = run-all
+mode = profile-run
 years = 15
 limit = 0
-event_set = moderate
+selected_lids = DARL1,MAGL1,OLVL1,AMIL1,ORAM6
 ```
 
-The workflow uploads `river-model-output` containing discovered mappings, processed event/training rows, reports, and models.
+Full recommended profile run:
+
+```text
+mode = profile-run
+years = 15
+limit = 0
+selected_lids = blank
+```
+
+The workflow uploads `river-model-output` containing discovered mappings, selected active sites, processed event/training rows, reports, and models.
