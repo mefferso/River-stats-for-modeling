@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LIX River Crest Model Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --line: #263244;
+      --good: #14532d;
+      --med: #854d0e;
+      --low: #7f1d1d;
+      --none: #374151;
+      --accent: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 22px 28px 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, #111827, #0f172a);
+    }
+    h1 { margin: 0 0 6px; font-size: 1.45rem; }
+    .sub { color: var(--muted); font-size: 0.92rem; }
+    main { padding: 18px 28px 32px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .card .label { color: var(--muted); font-size: 0.8rem; }
+    .card .value { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 0 0 14px;
+    }
+    input, select {
+      background: #0b1220;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 0.9rem;
+    }
+    input { min-width: 230px; }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    table { border-collapse: collapse; min-width: 1250px; width: 100%; }
+    th, td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      white-space: nowrap;
+      font-size: 0.86rem;
+    }
+    th {
+      color: #cbd5e1;
+      background: #111827;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      cursor: pointer;
+    }
+    td.left, th.left { text-align: left; }
+    tr:hover { background: #172033; }
+    .pill {
+      display: inline-block;
+      min-width: 56px;
+      text-align: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .high { background: var(--good); color: #dcfce7; }
+    .medium { background: var(--med); color: #fef3c7; }
+    .low { background: var(--low); color: #fee2e2; }
+    .none { background: var(--none); color: #e5e7eb; }
+    .ok { color: #86efac; }
+    .skipped, .missing_model, .missing_raw, .empty_raw { color: #fca5a5; }
+    footer { color: var(--muted); font-size: 0.78rem; margin-top: 14px; line-height: 1.45; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LIX River Crest Model Dashboard</h1>
+    <div class="sub" id="generated">Loading latest forecast output…</div>
+  </header>
+  <main>
+    <section class="cards" id="cards"></section>
+    <section class="controls">
+      <input id="search" placeholder="Filter by LID, name, model, status…" />
+      <select id="confidence">
+        <option value="">All confidence levels</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="none">None / skipped</option>
+      </select>
+      <select id="status">
+        <option value="">All statuses</option>
+        <option value="ok">OK</option>
+        <option value="skipped">Skipped</option>
+        <option value="missing_model">Missing model</option>
+        <option value="missing_raw">Missing raw</option>
+      </select>
+    </section>
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left" data-key="lid">LID</th>
+            <th class="left" data-key="name">Name</th>
+            <th data-key="current_stage_ft">Stage</th>
+            <th data-key="r1_ft_per_hr">1h rate</th>
+            <th data-key="r3_ft_per_hr">3h rate</th>
+            <th data-key="pred_remaining_rise_ft">Remain</th>
+            <th data-key="pred_crest_likely_ft">Likely crest</th>
+            <th data-key="pred_crest_conservative_ft">Conservative</th>
+            <th data-key="pred_crest_high_end_ft">High-end</th>
+            <th class="left" data-key="run_label">Model</th>
+            <th class="left" data-key="confidence">Confidence</th>
+            <th data-key="model_event_count">Events</th>
+            <th data-key="model_mae_ft">MAE</th>
+            <th data-key="model_bias_ft">Bias</th>
+            <th class="left" data-key="forecast_status">Status</th>
+            <th class="left" data-key="forecast_note">Note</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+    <footer>
+      Experimental statistical aid only. Forecast crests are based on historical stage/rise behavior and should be reviewed against official hydrologic guidance, rainfall, backwater, tide/wind, and basin context.
+    </footer>
+  </main>
+
+  <script>
+    let forecasts = [];
+    let sortKey = 'lid';
+    let sortDir = 1;
+
+    const fmt = (x, d = 2) => {
+      if (x === null || x === undefined || x === '') return '';
+      const n = Number(x);
+      return Number.isFinite(n) ? n.toFixed(d) : x;
+    };
+
+    function card(label, value) {
+      return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function renderCards(data) {
+      const ok = data.filter(r => r.forecast_status === 'ok').length;
+      const skipped = data.filter(r => r.forecast_status === 'skipped').length;
+      const high = data.filter(r => r.confidence === 'high').length;
+      const med = data.filter(r => r.confidence === 'medium').length;
+      document.getElementById('cards').innerHTML = [
+        card('Total LIDs', data.length),
+        card('Forecast OK', ok),
+        card('High confidence', high),
+        card('Medium confidence', med),
+        card('Skipped / unavailable', skipped)
+      ].join('');
+    }
+
+    function filtered() {
+      const q = document.getElementById('search').value.toLowerCase();
+      const conf = document.getElementById('confidence').value;
+      const status = document.getElementById('status').value;
+      return forecasts.filter(r => {
+        const text = `${r.lid} ${r.name} ${r.run_label} ${r.forecast_status} ${r.forecast_note}`.toLowerCase();
+        return (!q || text.includes(q)) && (!conf || r.confidence === conf) && (!status || r.forecast_status === status);
+      }).sort((a, b) => {
+        const av = a[sortKey] ?? '';
+        const bv = b[sortKey] ?? '';
+        const an = Number(av), bn = Number(bv);
+        if (Number.isFinite(an) && Number.isFinite(bn)) return (an - bn) * sortDir;
+        return String(av).localeCompare(String(bv)) * sortDir;
+      });
+    }
+
+    function render() {
+      const data = filtered();
+      renderCards(data);
+      document.getElementById('rows').innerHTML = data.map(r => `
+        <tr>
+          <td class="left"><strong>${r.lid || ''}</strong></td>
+          <td class="left">${r.name || ''}</td>
+          <td>${fmt(r.current_stage_ft)}</td>
+          <td>${fmt(r.r1_ft_per_hr)}</td>
+          <td>${fmt(r.r3_ft_per_hr)}</td>
+          <td>${fmt(r.pred_remaining_rise_ft)}</td>
+          <td><strong>${fmt(r.pred_crest_likely_ft)}</strong></td>
+          <td>${fmt(r.pred_crest_conservative_ft)}</td>
+          <td>${fmt(r.pred_crest_high_end_ft)}</td>
+          <td class="left">${r.run_label || ''}</td>
+          <td class="left"><span class="pill ${r.confidence || 'none'}">${r.confidence || 'none'}</span></td>
+          <td>${fmt(r.model_event_count, 0)}</td>
+          <td>${fmt(r.model_mae_ft)}</td>
+          <td>${fmt(r.model_bias_ft)}</td>
+          <td class="left ${r.forecast_status || ''}">${r.forecast_status || ''}</td>
+          <td class="left">${r.forecast_note || ''}</td>
+        </tr>`).join('');
+    }
+
+    document.querySelectorAll('th[data-key]').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        if (sortKey === key) sortDir *= -1;
+        else { sortKey = key; sortDir = 1; }
+        render();
+      });
+    });
+    document.getElementById('search').addEventListener('input', render);
+    document.getElementById('confidence').addEventListener('change', render);
+    document.getElementById('status').addEventListener('change', render);
+
+    fetch('latest_forecasts.json')
+      .then(r => r.json())
+      .then(payload => {
+        forecasts = payload.forecasts || [];
+        document.getElementById('generated').textContent = `Generated UTC: ${payload.generated_utc || 'unknown'} · ${forecasts.length} LIDs`;
+        render();
+      })
+      .catch(err => {
+        document.getElementById('generated').textContent = 'No latest_forecasts.json found yet. Run the forecast workflow first.';
+        console.error(err);
+      });
+  </script>
+</body>
+</html>
