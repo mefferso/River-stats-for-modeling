@@ -43,9 +43,14 @@ config/
   sites_with_usgs.csv          # discovered LID-to-USGS mapping
   model_profiles.csv           # recommended event-set choice per gage
 src/
+  model_core.py                # shared stage cleaning/prep, event, feature, and scoring helpers
   nwps_multigage_model.py      # discovery, download, original trainer, forecast/status
   crest_eventset_train.py      # flood/moderate/major/custom event-set trainer
   train_model_profiles.py      # trains recommended model profile per gage
+  forecast_profiles.py         # generates latest forecasts from recommended profile models
+  build_standalone_dashboard.py # writes the static dashboard files under docs/
+  backtest_profiles.py         # evaluation-only profile-model backtests and CSV reports
+  validate_config.py           # validates config CSVs before runs
   filter_sites.py              # filters sites to selected LIDs
   model_status.py              # enhanced status report
 data/
@@ -62,6 +67,14 @@ output/
 ---
 
 ## Recommended local workflow
+
+### 0) Validate config CSVs
+
+Before downloading/training, validate the config files for duplicate LIDs, missing required fields, profile/override LIDs not present in `sites.csv`, missing USGS IDs for active profiles, missing custom crest thresholds, and suspicious threshold values:
+
+```bash
+python src/validate_config.py
+```
 
 ### 1) Discover USGS IDs
 
@@ -189,6 +202,16 @@ output/reports/model_profile_summary.csv
 output/reports/model_summary.csv
 ```
 
+### Backtest profile models
+
+Backtesting is **evaluation/reporting only**. It trains temporary fold models using event-grouped splits (leave-one-event-out when practical) and does not replace operational model files. Reports are written under `output/reports/backtests/`:
+
+```bash
+python src/backtest_profiles.py --sites config/sites_with_usgs.csv --profiles config/model_profiles.csv
+```
+
+The generated CSVs include error by hours-to-crest bins, stage bins, rise-rate bins, event-level worst errors, bias by gage, and underforecast frequency.
+
 ---
 
 ## Check status
@@ -219,7 +242,47 @@ event_set = flood
 selected_lids = blank
 ```
 
-Full flood-plus:
+### Operational forecast modes
+
+`profile-forecast` is the reliable full operational mode for a fresh GitHub Actions runner. It discovers sites, refreshes thresholds, downloads stage data, trains recommended profile models, generates forecasts, builds the dashboard, and runs status:
+
+```text
+mode = profile-forecast
+years = 15
+limit = 0
+selected_lids = blank
+```
+
+`profile-run` is training-only for recommended profile models. It discovers sites, refreshes thresholds, downloads data, trains profile models, and runs status, but it does **not** generate forecasts or build/publish the dashboard:
+
+```text
+mode = profile-run
+years = 15
+limit = 0
+selected_lids = blank
+```
+
+`forecast-only` only runs the forecast/dashboard step against files that already exist in the runner workspace. It requires generated `data/raw/*_usgs_stage.csv` files and trained `output/models/*_ridge_model.joblib` files. It will fail on a fresh GitHub Actions runner; use `profile-forecast` for a fresh full operational forecast run.
+
+```text
+mode = forecast-only
+# only when data/raw and output/models already exist in the runner
+```
+
+### Backtesting mode
+
+`backtest-profiles` runs the full profile preparation/training path and then writes evaluation reports under `output/reports/backtests/`:
+
+```text
+mode = backtest-profiles
+years = 15
+limit = 0
+selected_lids = blank
+```
+
+### Other useful modes
+
+Full flood-plus event-set training:
 
 ```text
 mode = run-all
@@ -238,13 +301,4 @@ limit = 0
 selected_lids = DARL1,MAGL1,OLVL1,AMIL1,ORAM6
 ```
 
-Full recommended profile run:
-
-```text
-mode = profile-run
-years = 15
-limit = 0
-selected_lids = blank
-```
-
-The workflow uploads `river-model-output` containing discovered mappings, selected active sites, processed event/training rows, reports, and models.
+The workflow uploads `river-model-output` containing discovered mappings, selected active sites, processed event/training rows, reports (including `output/reports/backtests/`), dashboard docs, and models.

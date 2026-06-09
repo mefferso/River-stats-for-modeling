@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: What to run
+        description: What to run; use profile-forecast for a fresh full forecast run
         required: true
         default: smoke
         type: choice
@@ -18,7 +18,8 @@ on:
           - profile-run
           - profile-train
           - profile-forecast
-          - forecast-only
+          - backtest-profiles
+          - forecast-only # Requires existing data/raw and output/models files in the runner; use profile-forecast on fresh runners.
           - status
       years:
         description: Years of USGS data for download/train/run-all
@@ -101,9 +102,38 @@ jobs:
           if limit < 0 or limit > 100:
               raise SystemExit('limit must be between 0 and 100')
 
+          def log(message):
+              print(message, flush=True)
+
           def run(cmd):
               print('RUN:', ' '.join(str(x) for x in cmd), flush=True)
               subprocess.run([str(x) for x in cmd], check=True)
+
+          def log_mode_guidance():
+              log('Mode guidance:')
+              log('  Full fresh-run modes: smoke, train, run-all, profile-run, profile-forecast, backtest-profiles.')
+              log('  Reliable operational forecast mode: profile-forecast (discovers sites, refreshes thresholds, downloads data, trains profile models, forecasts, builds dashboard).')
+              log('  Backtesting mode: backtest-profiles performs a full profile train plus evaluation reports under output/reports/backtests/.')
+              log('  Partial modes: discover, thresholds, download, status.')
+              log('  Existing-file modes: profile-train requires data/raw files; forecast-only requires pre-existing data/raw stage CSVs and output/models/*.joblib files in this runner.')
+              log('  On a fresh GitHub Actions runner, use profile-forecast instead of forecast-only.')
+
+          def require_forecast_only_inputs():
+              raw_files = [p for p in os.listdir('data/raw') if p.endswith('_usgs_stage.csv')] if os.path.isdir('data/raw') else []
+              model_files = [p for p in os.listdir('output/models') if p.endswith('_ridge_model.joblib')] if os.path.isdir('output/models') else []
+              if raw_files and model_files:
+                  log(f'forecast-only prerequisites found: {len(raw_files)} raw stage CSV(s), {len(model_files)} model file(s).')
+                  return
+              log('forecast-only cannot run safely on a fresh GitHub Actions runner.')
+              log('Missing generated prerequisites:')
+              if not raw_files:
+                  log('  - data/raw/*_usgs_stage.csv')
+              if not model_files:
+                  log('  - output/models/*_ridge_model.joblib')
+              log('Use mode=profile-forecast for the reliable full operational run, or run forecast-only only in a runner/workspace where those generated files already exist.')
+              raise SystemExit(2)
+
+          log_mode_guidance()
 
           force_arg = ['--force'] if force else ['--skip-existing']
           crest_arg = ['--min-crest-stage', min_crest_stage] if min_crest_stage else []
@@ -117,6 +147,7 @@ jobs:
           download = ['python', 'src/nwps_multigage_model.py', 'download', '--sites', active_sites, '--years', years] + force_arg
           train = ['python', 'src/crest_eventset_train.py', 'train', '--sites', active_sites, '--event-set', event_set] + crest_arg
           profile_train = ['python', 'src/train_model_profiles.py', '--sites', active_sites, '--lids', selected_lids]
+          backtest = ['python', 'src/backtest_profiles.py', '--sites', active_sites, '--lids', selected_lids]
           forecast = ['python', 'src/forecast_profiles.py', '--sites', active_sites, '--lids', selected_lids]
           dashboard = ['python', 'src/build_standalone_dashboard.py']
           status = ['python', 'src/model_status.py', '--sites', active_sites]
@@ -165,6 +196,12 @@ jobs:
               run(forecast)
               run(dashboard)
               run(status)
+          elif mode == 'backtest-profiles':
+              prepare_sites()
+              run(download)
+              run(profile_train)
+              run(backtest)
+              run(status)
           elif mode == 'profile-train':
               if active_sites != discovered:
                   if not os.path.exists(discovered):
@@ -174,7 +211,9 @@ jobs:
               run(profile_train)
               run(status)
           elif mode == 'forecast-only':
+              require_forecast_only_inputs()
               site_file = active_sites if os.path.exists(active_sites) else (discovered if os.path.exists(discovered) else 'config/sites.csv')
+              log(f'forecast-only using site file: {site_file}')
               run(['python', 'src/forecast_profiles.py', '--sites', site_file, '--lids', selected_lids])
               run(dashboard)
           elif mode == 'status':
@@ -210,8 +249,10 @@ jobs:
             config/sites_with_usgs.csv
             config/sites_active.csv
             config/model_profiles.csv
+            config/forecast_overrides.csv
             data/processed/
             docs/
             output/
+            output/reports/backtests/
           if-no-files-found: ignore
           retention-days: 14
