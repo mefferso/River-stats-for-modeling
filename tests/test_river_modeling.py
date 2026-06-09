@@ -263,6 +263,28 @@ def test_above_threshold_but_falling_becomes_receding(tmp_path: Path, monkeypatc
     assert "pred_crest_high_end_ft" not in receding
 
 
+def test_at_threshold_flat_tiny_remaining_becomes_cresting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    site, profile = setup_forecast_files(tmp_path, monkeypatch, recent_stage_series([10.2, 10.2, 10.2, 10.2]), remaining=0.05)
+
+    cresting = forecast_profiles.forecast_one(
+        site,
+        profile,
+        {"event_count": 10, "holdout_events": 3, "mae_ft": 0.8, "bias_ft": 0.1, "r2": 0.7},
+        {},
+        forecast_args(max_data_age_hours=6.0),
+    )
+
+    assert cresting["forecast_status"] == "cresting"
+    assert cresting["confidence"] == "high"
+    assert cresting["r1_ft_per_hr"] <= 0.02
+    assert cresting["r3_ft_per_hr"] <= 0.02
+    assert cresting["pred_remaining_rise_ft"] == 0.0
+    assert cresting["pred_crest_likely_ft"] == pytest.approx(cresting["current_stage_ft"])
+    assert cresting["pred_crest_conservative_ft"] == pytest.approx(cresting["current_stage_ft"])
+    assert cresting["pred_crest_high_end_ft"] == pytest.approx(cresting["current_stage_ft"] + 0.8)
+    assert cresting["forecast_note"] == "current stage is near/at crest with little remaining rise expected"
+
+
 def test_above_threshold_and_rising_can_still_forecast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     site, profile = setup_forecast_files(tmp_path, monkeypatch, recent_stage_series([9.0, 9.4, 9.8, 10.2]), remaining=1.5)
 

@@ -6,36 +6,19 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-FETCH_START = "    fetch('latest_forecasts.json')"
-FETCH_END = "      });"
-
-
-def replace_forecast_fetch_block(html: str, payload: str) -> str:
-    """Replace the dashboard's runtime JSON fetch block with embedded JSON.
-
-    The dashboard template can evolve as the front-end gains new fields.  The
-    previous implementation matched one exact JavaScript block, which broke as
-    soon as manual_models support was added.  Instead, find the fetch block by
-    its stable start/end markers and replace the whole block.
-    """
-
-    start = html.find(FETCH_START)
-    if start == -1:
-        raise SystemExit("Could not find latest_forecasts.json fetch block in dashboard template")
-
-    end = html.find(FETCH_END, start)
-    if end == -1:
-        raise SystemExit("Could not find end of latest_forecasts.json fetch block in dashboard template")
-    end += len(FETCH_END)
-
-    replacement = f"""const payload = {payload};
-    forecasts = payload.forecasts || [];
-    manualModels = payload.manual_models || {{}};
-    document.getElementById('generated').textContent = `Generated UTC: ${{payload.generated_utc || 'unknown'}} · ${{forecasts.length}} LIDs`;
-    populateManualChoices();
-    render();"""
-
-    return html[:start] + replacement + html[end:]
+FETCH_BLOCK = """fetch('latest_forecasts.json')
+      .then(r => r.json())
+      .then(payload => {
+        forecasts = payload.forecasts || [];
+        manualModels = payload.manual_models || {};
+        document.getElementById('generated').textContent = `Generated UTC: ${payload.generated_utc || 'unknown'} · ${forecasts.length} LIDs`;
+        populateManualChoices();
+        render();
+      })
+      .catch(err => {
+        document.getElementById('generated').textContent = 'No latest_forecasts.json found yet. Run the forecast workflow first.';
+        console.error(err);
+      });"""
 
 
 def main() -> None:

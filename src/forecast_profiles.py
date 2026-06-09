@@ -316,6 +316,21 @@ def forecast_one(
     high_end = max(conservative, bias_corrected + max(0.0, under_p90))
     confidence = confidence_bucket("ok", profile_skill)
 
+    if current_stage >= threshold_used and r1 <= 0.02 and r3 <= 0.02 and remaining <= 0.10:
+        high_end_crest = current_stage + mae if mae is not None else current_stage
+        row.update(
+            {
+                "forecast_status": "cresting",
+                "forecast_note": "current stage is near/at crest with little remaining rise expected",
+                "pred_remaining_rise_ft": 0.0,
+                "pred_crest_likely_ft": current_stage,
+                "pred_crest_conservative_ft": current_stage,
+                "pred_crest_high_end_ft": high_end_crest,
+                "confidence": "high",
+            }
+        )
+        return row
+
     row.update(
         {
             "forecast_status": "ok",
