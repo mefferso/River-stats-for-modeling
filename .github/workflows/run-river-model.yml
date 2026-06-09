@@ -18,6 +18,7 @@ on:
           - profile-run
           - profile-train
           - profile-forecast
+          - backtest-profiles
           - forecast-only # Requires existing data/raw and output/models files in the runner; use profile-forecast on fresh runners.
           - status
       years:
@@ -110,8 +111,9 @@ jobs:
 
           def log_mode_guidance():
               log('Mode guidance:')
-              log('  Full fresh-run modes: smoke, train, run-all, profile-run, profile-forecast.')
+              log('  Full fresh-run modes: smoke, train, run-all, profile-run, profile-forecast, backtest-profiles.')
               log('  Reliable operational forecast mode: profile-forecast (discovers sites, refreshes thresholds, downloads data, trains profile models, forecasts, builds dashboard).')
+              log('  Backtesting mode: backtest-profiles performs a full profile train plus evaluation reports under output/reports/backtests/.')
               log('  Partial modes: discover, thresholds, download, status.')
               log('  Existing-file modes: profile-train requires data/raw files; forecast-only requires pre-existing data/raw stage CSVs and output/models/*.joblib files in this runner.')
               log('  On a fresh GitHub Actions runner, use profile-forecast instead of forecast-only.')
@@ -145,6 +147,7 @@ jobs:
           download = ['python', 'src/nwps_multigage_model.py', 'download', '--sites', active_sites, '--years', years] + force_arg
           train = ['python', 'src/crest_eventset_train.py', 'train', '--sites', active_sites, '--event-set', event_set] + crest_arg
           profile_train = ['python', 'src/train_model_profiles.py', '--sites', active_sites, '--lids', selected_lids]
+          backtest = ['python', 'src/backtest_profiles.py', '--sites', active_sites, '--lids', selected_lids]
           forecast = ['python', 'src/forecast_profiles.py', '--sites', active_sites, '--lids', selected_lids]
           dashboard = ['python', 'src/build_standalone_dashboard.py']
           status = ['python', 'src/model_status.py', '--sites', active_sites]
@@ -192,6 +195,12 @@ jobs:
               run(profile_train)
               run(forecast)
               run(dashboard)
+              run(status)
+          elif mode == 'backtest-profiles':
+              prepare_sites()
+              run(download)
+              run(profile_train)
+              run(backtest)
               run(status)
           elif mode == 'profile-train':
               if active_sites != discovered:
@@ -243,5 +252,6 @@ jobs:
             data/processed/
             docs/
             output/
+            output/reports/backtests/
           if-no-files-found: ignore
           retention-days: 14
