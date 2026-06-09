@@ -25,6 +25,7 @@ jobs:
 
       - name: Compile source
         run: |
+          python -m py_compile src/model_core.py
           python -m py_compile src/nwps_multigage_model.py
           python -m py_compile src/crest_eventset_train.py
           python -m py_compile src/filter_sites.py

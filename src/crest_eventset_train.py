@@ -63,31 +63,7 @@ def safe_label(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_\-]+", "_", text.strip()).strip("_") or "model"
 
 
-def as_float(value: Any) -> float | None:
-    """Convert scalar-ish values to float; ignore arrays/lists/dicts.
-
-    NWPS JSON occasionally has arrays under threshold-ish keys. Pandas turns
-    pd.isna(array) into an array of booleans, which cannot be used in an if.
-    This guard keeps threshold discovery from face-planting on that junk.
-    """
-    if value is None:
-        return None
-    if isinstance(value, (dict, list, tuple, set, np.ndarray, pd.Series, pd.Index)):
-        return None
-    try:
-        missing = pd.isna(value)
-    except Exception:
-        missing = False
-    if isinstance(missing, (bool, np.bool_)) and missing:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        out = float(text)
-    except (TypeError, ValueError):
-        return None
-    return out if math.isfinite(out) else None
+as_float = base.coerce_float
 
 
 def read_sites(path: str | Path) -> pd.DataFrame:
@@ -190,13 +166,11 @@ def command_discover_thresholds(args: argparse.Namespace) -> None:
 
 
 def event_start_threshold(stage: pd.Series, site: pd.Series | dict[str, Any]) -> float:
-    for col in ["event_start_threshold_ft", "event_threshold_ft", "action_stage_ft", "minor_stage_ft", "flood_stage_ft"]:
-        value = as_float(site.get(col, ""))
-        if value is not None:
-            return value
-    q90 = float(stage.quantile(0.90))
-    q75 = float(stage.quantile(0.75))
-    return max(q90, q75 + 1.0)
+    return base.choose_threshold(
+        stage,
+        site,
+        ["event_start_threshold_ft", "event_threshold_ft", "action_stage_ft", "minor_stage_ft", "flood_stage_ft"],
+    )
 
 
 def min_crest_stage(site: pd.Series | dict[str, Any], settings: EventSetSettings) -> tuple[float | None, str]:
