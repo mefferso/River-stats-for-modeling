@@ -265,7 +265,7 @@ def parse_usgs_iv_json(data: Any) -> pd.DataFrame:
         return pd.DataFrame(columns=["datetime", "stage_ft", "qualifiers"])
     df = pd.DataFrame(recs)
     df["datetime"] = pd.to_datetime(df["datetime"], utc=True, errors="coerce")
-    df["stage_ft"] = pd.to_numeric(df["stage_ft"], errors="coerce")
+    df = clean_stage_data(df)
     return (
         df.dropna(subset=["datetime", "stage_ft"])
         .drop_duplicates("datetime")
@@ -306,7 +306,7 @@ def download_usgs_stage(
     if not chunks:
         return pd.DataFrame(columns=["datetime", "stage_ft", "qualifiers"])
 
-    df = pd.concat(chunks, ignore_index=True)
+    df = clean_stage_data(pd.concat(chunks, ignore_index=True))
     return (
         df.dropna(subset=["datetime", "stage_ft"])
         .drop_duplicates("datetime")
@@ -348,12 +348,30 @@ def command_download(args: argparse.Namespace) -> None:
         print(f"  {len(df):,} rows -> {out}")
 
 
+def clean_stage_data(df: pd.DataFrame, stage_col: str = "stage_ft") -> pd.DataFrame:
+    """Return rows with usable stage values only.
+
+    USGS/NWPS stage files can contain blanks, NaN values, no-data sentinels
+    such as -999999, and physically implausible values. Keep the original
+    columns, coerce the stage column to numeric, and retain only values in the
+    plausible modeling range (-1000, 200).
+    """
+    columns = list(df.columns) if stage_col in df.columns else [*df.columns, stage_col]
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+    out = df.copy()
+    if stage_col not in out.columns:
+        out[stage_col] = np.nan
+    out[stage_col] = pd.to_numeric(out[stage_col], errors="coerce")
+    out = out[out[stage_col].notna() & (out[stage_col] > -1000) & (out[stage_col] < 200)].copy()
+    return out
+
+
 def prep_stage(df: pd.DataFrame, freq: str = "15min") -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["datetime", "stage_ft"])
-    out = df.copy()
+    out = clean_stage_data(df)
     out["datetime"] = pd.to_datetime(out["datetime"], utc=True, errors="coerce")
-    out["stage_ft"] = pd.to_numeric(out["stage_ft"], errors="coerce")
     out = out.dropna(subset=["datetime", "stage_ft"]).sort_values("datetime")
     if out.empty:
         return pd.DataFrame(columns=["datetime", "stage_ft"])
@@ -558,6 +576,7 @@ def residual_stats(error_ft: pd.Series) -> dict[str, float]:
 
 
 def train_one_lid(lid: str, stage_df: pd.DataFrame, site_row: pd.Series | dict[str, Any], settings: EventSettings) -> dict[str, Any]:
+    stage_df = clean_stage_data(stage_df)
     events = detect_events(stage_df, site_row=site_row, settings=settings)
     event_out = DATA_PROCESSED / f"{lid}_events.csv"
     train_out = DATA_PROCESSED / f"{lid}_training_rows.csv"
