@@ -34,16 +34,10 @@ def main() -> None:
 
     html = template.read_text(encoding="utf-8")
     payload = json_path.read_text(encoding="utf-8")
-    replacement = f"""const payload = {payload};
-    forecasts = payload.forecasts || [];
-    document.getElementById('generated').textContent = `Generated UTC: ${{payload.generated_utc || 'unknown'}} · ${{forecasts.length}} LIDs`;
-    render();"""
-
-    if FETCH_BLOCK not in html:
-        raise SystemExit("Could not find forecast fetch block in dashboard template")
+    standalone_html = replace_forecast_fetch_block(html, payload)
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(html.replace(FETCH_BLOCK, replacement), encoding="utf-8")
+    output.write_text(standalone_html, encoding="utf-8")
     print(f"Wrote {output}")
 
 
