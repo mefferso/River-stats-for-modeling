@@ -59,13 +59,6 @@ def clean(value: Any) -> Any:
     return value
 
 
-def clean_raw_stage(raw: pd.DataFrame) -> pd.DataFrame:
-    df = raw.copy()
-    df["stage_ft"] = pd.to_numeric(df.get("stage_ft"), errors="coerce")
-    df = df[(df["stage_ft"] > -1000) & (df["stage_ft"] < 200)]
-    return df
-
-
 def load_overrides(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
@@ -225,7 +218,7 @@ def forecast_one(
         row.update({"forecast_status": "missing_model", "forecast_note": f"missing {model_file}", "confidence": "none"})
         return row
 
-    df = base.prep_stage(clean_raw_stage(pd.read_csv(raw)))
+    df = base.prep_stage(pd.read_csv(raw))
     if df.empty:
         row.update({"forecast_status": "empty_raw", "forecast_note": "no usable stage rows", "confidence": "none"})
         return row

@@ -27,10 +27,8 @@ def read_profiles(path: str | Path) -> pd.DataFrame:
 
 def read_clean_raw(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
-    df['stage_ft'] = pd.to_numeric(df.get('stage_ft'), errors='coerce')
-    # Drop no-data sentinels and physically impossible junk before event detection/training.
     before = len(df)
-    df = df[(df['stage_ft'] > -1000) & (df['stage_ft'] < 200)].copy()
+    df = base.clean_stage_data(df)
     dropped = before - len(df)
     if dropped:
         print(f'  dropped {dropped:,} impossible stage rows from {path.name}')
