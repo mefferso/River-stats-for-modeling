@@ -161,34 +161,27 @@ def _first_or_blank(group: pd.DataFrame, column: str) -> Any:
 
 
 def add_event_metadata_to_training_rows(train: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
-    """Attach event-level metadata that feature_rows intentionally does not model on.
-
-    The shared feature builder keeps the modeling rows lean. Backtest reports still
-    need event metadata such as crest_time, so merge those columns back in by
-    event_id after feature generation.
-    """
+    """Attach event-level metadata that feature_rows intentionally does not model on."""
     if train.empty or events.empty or "event_id" not in train.columns or "event_id" not in events.columns:
         return train
 
-    metadata_cols = [
-        col
-        for col in [
-            "event_id",
-            "start_time",
-            "rise_start_time",
-            "crest_time",
-            "end_time",
-            "crest_stage_ft",
-            "total_rise_ft",
-            "duration_hr",
-            "rise_duration_hr",
-        ]
-        if col in events.columns and col not in train.columns
+    optional_metadata_cols = [
+        "start_time",
+        "rise_start_time",
+        "crest_time",
+        "end_time",
+        "crest_stage_ft",
+        "total_rise_ft",
+        "duration_hr",
+        "rise_duration_hr",
+    ]
+    metadata_cols = ["event_id"] + [
+        col for col in optional_metadata_cols if col in events.columns and col not in train.columns
     ]
     if len(metadata_cols) <= 1:
         return train
 
-    metadata = events[metadata_cols].drop_duplicates("event_id")
+    metadata = events[metadata_cols].drop_duplicates(subset=["event_id"])
     return train.merge(metadata, on="event_id", how="left")
 
 
