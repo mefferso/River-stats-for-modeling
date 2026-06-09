@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
@@ -33,12 +34,19 @@ def stage_series(values: list[float], start: str = "2024-01-01T00:00:00Z", freq:
     )
 
 
+def recent_stage_series(values: list[float], freq: str = "h") -> pd.DataFrame:
+    end = pd.Timestamp(datetime.now(timezone.utc)).floor(freq)
+    start = end - (len(values) - 1) * pd.Timedelta(1, unit=freq)
+    return stage_series(values, start=start.isoformat(), freq=freq)
+
+
 def forecast_args(**overrides: float) -> Namespace:
     defaults = {
         "h0_lookback_hours": 12.0,
         "early_window_ft": 0.5,
         "min_stage_rise_ft": 0.5,
         "min_r3_rise_rate": 0.05,
+        "max_data_age_hours": 6.0,
     }
     defaults.update(overrides)
     return Namespace(**defaults)
@@ -161,27 +169,39 @@ def test_active_event_flag_distinguishes_active_early_rise_and_inactive() -> Non
     assert "inactive" in inactive[2]
 
 
-def test_forecast_one_returns_inactive_without_prediction_and_ok_when_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def forecast_site_and_profile() -> tuple[pd.Series, pd.Series]:
+    site = pd.Series({"lid": "TEST", "name": "Synthetic", "usgs_site": "01234567", "event_start_threshold_ft": "10.0"})
+    profile = pd.Series({"lid": "TEST", "recommended_event_set": "flood", "recommended_min_crest_stage_ft": "", "reason": "test"})
+    return site, profile
+
+
+def setup_forecast_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    raw: pd.DataFrame,
+    remaining: float = 2.25,
+) -> tuple[pd.Series, pd.Series]:
     raw_dir = tmp_path / "raw"
     model_dir = tmp_path / "models"
     raw_dir.mkdir()
     model_dir.mkdir()
     monkeypatch.setattr(base, "DATA_RAW", raw_dir)
     monkeypatch.setattr(base, "MODEL_DIR", model_dir)
-
-    site = pd.Series({"lid": "TEST", "name": "Synthetic", "usgs_site": "01234567", "event_start_threshold_ft": "10.0"})
-    profile = pd.Series({"lid": "TEST", "recommended_event_set": "flood", "recommended_min_crest_stage_ft": "", "reason": "test"})
-    raw = stage_series([8.0, 8.1, 8.2, 8.3, 8.4, 8.5], freq="h")
     raw.to_csv(raw_dir / "TEST_usgs_stage.csv", index=False)
-    joblib.dump({"model": ConstantRemainingModel(2.25), "metadata": {"skill": {}}}, model_dir / "TEST_flood_plus_ridge_model.joblib")
+    joblib.dump({"model": ConstantRemainingModel(remaining), "metadata": {"skill": {}}}, model_dir / "TEST_flood_plus_ridge_model.joblib")
+    return forecast_site_and_profile()
+
+
+def test_forecast_one_returns_inactive_without_prediction_and_ok_when_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    site, profile = setup_forecast_files(tmp_path, monkeypatch, recent_stage_series([8.0, 8.1, 8.2, 8.3, 8.4, 8.5]))
 
     inactive = forecast_profiles.forecast_one(site, profile, {}, {}, forecast_args())
     assert inactive["forecast_status"] == "inactive"
     assert inactive["confidence"] == "none"
     assert "pred_remaining_rise_ft" not in inactive
 
-    active_raw = stage_series([8.0, 8.4, 8.8, 9.2, 9.6, 10.1, 250.0], freq="h")
-    active_raw.to_csv(raw_dir / "TEST_usgs_stage.csv", index=False)
+    active_raw = recent_stage_series([8.0, 8.4, 8.8, 9.2, 9.6, 10.1, 250.0])
+    active_raw.to_csv(base.DATA_RAW / "TEST_usgs_stage.csv", index=False)
     active = forecast_profiles.forecast_one(
         site,
         profile,
@@ -192,10 +212,71 @@ def test_forecast_one_returns_inactive_without_prediction_and_ok_when_active(tmp
 
     assert active["forecast_status"] == "ok"
     assert active["current_stage_ft"] < 11.0
+    assert active["data_age_hours"] <= 6.0
     assert active["confidence"] == "high"
     assert active["pred_remaining_rise_ft"] == pytest.approx(2.0)
     assert active["pred_crest_likely_ft"] == pytest.approx(active["current_stage_ft"] + 2.0)
     assert "capped" in active["forecast_note"]
+
+
+def test_stale_data_becomes_stale_data_without_prediction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    site, profile = setup_forecast_files(tmp_path, monkeypatch, stage_series([9.0, 9.5, 10.2, 10.4], start="2024-01-01T00:00:00Z", freq="h"))
+
+    stale = forecast_profiles.forecast_one(site, profile, {}, {}, forecast_args(max_data_age_hours=6.0))
+
+    assert stale["forecast_status"] == "stale_data"
+    assert stale["confidence"] == "none"
+    assert stale["forecast_note"] == "latest observation is too old for forecast use"
+    assert stale["data_age_hours"] > 6.0
+    assert "pred_crest_likely_ft" not in stale
+    assert "pred_crest_conservative_ft" not in stale
+    assert "pred_crest_high_end_ft" not in stale
+
+
+def test_fresh_data_can_still_forecast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    site, profile = setup_forecast_files(tmp_path, monkeypatch, recent_stage_series([8.0, 8.6, 9.4, 10.2]), remaining=1.5)
+
+    fresh = forecast_profiles.forecast_one(
+        site,
+        profile,
+        {"event_count": 10, "holdout_events": 3, "mae_ft": 0.8, "bias_ft": 0.1, "r2": 0.7},
+        {},
+        forecast_args(max_data_age_hours=6.0),
+    )
+
+    assert fresh["forecast_status"] == "ok"
+    assert fresh["data_age_hours"] <= 6.0
+    assert fresh["pred_crest_likely_ft"] == pytest.approx(fresh["current_stage_ft"] + 1.5)
+
+
+def test_above_threshold_but_falling_becomes_receding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    site, profile = setup_forecast_files(tmp_path, monkeypatch, recent_stage_series([11.0, 10.8, 10.5, 10.2]), remaining=1.5)
+
+    receding = forecast_profiles.forecast_one(site, profile, {}, {}, forecast_args(max_data_age_hours=6.0))
+
+    assert receding["forecast_status"] == "receding"
+    assert receding["confidence"] == "none"
+    assert receding["r3_ft_per_hr"] <= -0.05
+    assert receding["forecast_note"] == "current stage is at/above threshold but falling; rising crest forecast suppressed."
+    assert "pred_crest_likely_ft" not in receding
+    assert "pred_crest_conservative_ft" not in receding
+    assert "pred_crest_high_end_ft" not in receding
+
+
+def test_above_threshold_and_rising_can_still_forecast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    site, profile = setup_forecast_files(tmp_path, monkeypatch, recent_stage_series([9.0, 9.4, 9.8, 10.2]), remaining=1.5)
+
+    rising = forecast_profiles.forecast_one(
+        site,
+        profile,
+        {"event_count": 10, "holdout_events": 3, "mae_ft": 0.8, "bias_ft": 0.1, "r2": 0.7},
+        {},
+        forecast_args(max_data_age_hours=6.0),
+    )
+
+    assert rising["forecast_status"] == "ok"
+    assert rising["r3_ft_per_hr"] > -0.05
+    assert rising["pred_crest_likely_ft"] == pytest.approx(rising["current_stage_ft"] + 1.5)
 
 
 def test_confidence_bucket_assignment() -> None:

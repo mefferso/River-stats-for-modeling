@@ -249,6 +249,7 @@ jobs:
             config/sites_with_usgs.csv
             config/sites_active.csv
             config/model_profiles.csv
+            config/forecast_overrides.csv
             data/processed/
             docs/
             output/
