@@ -14,6 +14,7 @@ SCRIPT_MODULES = [
     "train_model_profiles",
     "forecast_profiles",
     "build_standalone_dashboard",
+    "backtest_profiles",
     "validate_config",
 ]
 
@@ -25,6 +26,7 @@ SCRIPT_PATHS = [
     "src/train_model_profiles.py",
     "src/forecast_profiles.py",
     "src/build_standalone_dashboard.py",
+    "src/backtest_profiles.py",
     "src/validate_config.py",
 ]
 
