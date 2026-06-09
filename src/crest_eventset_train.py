@@ -307,6 +307,7 @@ def detect_events(stage_df: pd.DataFrame, site: pd.Series | dict[str, Any], sett
 
 def train_one(lid: str, stage_df: pd.DataFrame, site: pd.Series | dict[str, Any], settings: EventSetSettings) -> dict[str, Any]:
     label = settings.label
+    stage_df = base.clean_stage_data(stage_df)
     events = detect_events(stage_df, site, settings)
     event_file = base.DATA_PROCESSED / f"{lid}_{label}_events.csv"
     train_file = base.DATA_PROCESSED / f"{lid}_{label}_training_rows.csv"
