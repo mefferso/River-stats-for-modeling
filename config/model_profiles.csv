@@ -21,8 +21,6 @@ CVEL1,moderate,,moderate-plus improved versus flood-plus
 TYTM6,moderate,,moderate-plus improved versus flood-plus
 FRNL1,flood,,moderate-plus too sparse; use flood-plus baseline
 BSHL1,flood,,use flood-plus baseline
-BXAL1,flood,,solid flood-plus baseline
-PERL1,flood,,flood-plus baseline selected despite good sparse moderate score
 MNLM6,flood,,moderate underforecasted; use flood-plus baseline
 CREM6,moderate,,strong moderate-plus model
 KLNM6,flood,,flood-plus baseline but likely mixed/tidal/backwater review needed

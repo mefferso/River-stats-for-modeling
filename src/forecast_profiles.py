@@ -59,13 +59,6 @@ def clean(value: Any) -> Any:
     return value
 
 
-def clean_raw_stage(raw: pd.DataFrame) -> pd.DataFrame:
-    df = raw.copy()
-    df["stage_ft"] = pd.to_numeric(df.get("stage_ft"), errors="coerce")
-    df = df[(df["stage_ft"] > -1000) & (df["stage_ft"] < 200)]
-    return df
-
-
 def load_overrides(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
@@ -225,12 +218,14 @@ def forecast_one(
         row.update({"forecast_status": "missing_model", "forecast_note": f"missing {model_file}", "confidence": "none"})
         return row
 
-    df = base.prep_stage(clean_raw_stage(pd.read_csv(raw)))
+    df = base.prep_stage(pd.read_csv(raw))
     if df.empty:
         row.update({"forecast_status": "empty_raw", "forecast_note": "no usable stage rows", "confidence": "none"})
         return row
 
     current_time = pd.Timestamp(df.iloc[-1]["datetime"])
+    generated_time = datetime.now(timezone.utc)
+    data_age_hours = max(0.0, (generated_time - current_time.to_pydatetime()).total_seconds() / 3600)
     current_stage = float(df.iloc[-1]["stage_ft"])
     h0_time, h0_stage = find_recent_h0(df, current_time, args.h0_lookback_hours)
     elapsed = max(0.0, (current_time - h0_time).total_seconds() / 3600)
@@ -242,7 +237,8 @@ def forecast_one(
 
     shared = {
         "forecast_time_utc": current_time.isoformat(),
-        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_utc": generated_time.isoformat(),
+        "data_age_hours": data_age_hours,
         "current_stage_ft": current_stage,
         "h0_stage_ft": h0_stage,
         "elapsed_hr_since_rise_start": elapsed,
@@ -260,6 +256,26 @@ def forecast_one(
         "override_notes": overrides.get("notes", ""),
     }
     row.update(shared)
+
+    if data_age_hours > args.max_data_age_hours:
+        row.update(
+            {
+                "forecast_status": "stale_data",
+                "forecast_note": "latest observation is too old for forecast use",
+                "confidence": "none",
+            }
+        )
+        return row
+
+    if current_stage >= threshold_used and r3 <= -0.05:
+        row.update(
+            {
+                "forecast_status": "receding",
+                "forecast_note": "current stage is at/above threshold but falling; rising crest forecast suppressed.",
+                "confidence": "none",
+            }
+        )
+        return row
 
     if not active:
         row.update({"forecast_status": "inactive", "forecast_note": active_note, "confidence": "none"})
@@ -299,6 +315,21 @@ def forecast_one(
     conservative = max(likely, bias_corrected + max(0.0, under_p75))
     high_end = max(conservative, bias_corrected + max(0.0, under_p90))
     confidence = confidence_bucket("ok", profile_skill)
+
+    if current_stage >= threshold_used and r1 <= 0.02 and r3 <= 0.02 and remaining <= 0.10:
+        high_end_crest = current_stage + mae if mae is not None else current_stage
+        row.update(
+            {
+                "forecast_status": "cresting",
+                "forecast_note": "current stage is near/at crest with little remaining rise expected",
+                "pred_remaining_rise_ft": 0.0,
+                "pred_crest_likely_ft": current_stage,
+                "pred_crest_conservative_ft": current_stage,
+                "pred_crest_high_end_ft": high_end_crest,
+                "confidence": "high",
+            }
+        )
+        return row
 
     row.update(
         {
@@ -386,6 +417,7 @@ def main() -> None:
     parser.add_argument("--early-window-ft", type=float, default=2.0)
     parser.add_argument("--min-stage-rise-ft", type=float, default=0.75)
     parser.add_argument("--min-r3-rise-rate", type=float, default=0.05)
+    parser.add_argument("--max-data-age-hours", type=float, default=6.0)
     parser.add_argument("--output-csv", default=str(FORECAST_DIR / "latest_forecasts.csv"))
     parser.add_argument("--output-json", default=str(FORECAST_DIR / "latest_forecasts.json"))
     parser.add_argument("--docs-json", default=str(DOCS_DIR / "latest_forecasts.json"))

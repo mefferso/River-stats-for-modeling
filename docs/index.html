@@ -319,7 +319,8 @@
       const status = document.getElementById('status').value;
       return forecasts.filter(r => {
         const text = `${r.lid} ${r.name} ${r.run_label} ${r.forecast_status} ${r.forecast_note} ${r.override_notes}`.toLowerCase();
-        return (!q || text.includes(q)) && (!conf || r.confidence === conf) && (!status || r.forecast_status === status);
+        const hideSkippedByDefault = !status && r.forecast_status === 'skipped';
+        return !hideSkippedByDefault && (!q || text.includes(q)) && (!conf || r.confidence === conf) && (!status || r.forecast_status === status);
       }).sort((a, b) => {
         const av = a[sortKey] ?? '';
         const bv = b[sortKey] ?? '';

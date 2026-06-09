@@ -10,7 +10,9 @@ FETCH_BLOCK = """fetch('latest_forecasts.json')
       .then(r => r.json())
       .then(payload => {
         forecasts = payload.forecasts || [];
+        manualModels = payload.manual_models || {};
         document.getElementById('generated').textContent = `Generated UTC: ${payload.generated_utc || 'unknown'} · ${forecasts.length} LIDs`;
+        populateManualChoices();
         render();
       })
       .catch(err => {

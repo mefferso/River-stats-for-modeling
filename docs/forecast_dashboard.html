@@ -18,91 +18,52 @@
       --accent: #38bdf8;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    header {
-      padding: 22px 28px 12px;
-      border-bottom: 1px solid var(--line);
-      background: linear-gradient(135deg, #111827, #0f172a);
-    }
-    h1 { margin: 0 0 6px; font-size: 1.45rem; }
-    .sub { color: var(--muted); font-size: 0.92rem; }
-    main { padding: 18px 28px 32px; }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 12px 14px;
-    }
-    .card .label { color: var(--muted); font-size: 0.8rem; }
-    .card .value { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
-    .controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin: 0 0 14px;
-    }
-    input, select {
-      background: #0b1220;
-      color: var(--text);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 9px 10px;
-      font-size: 0.9rem;
-    }
-    input { min-width: 230px; }
-    .table-wrap {
-      overflow-x: auto;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: var(--panel);
-    }
-    table { border-collapse: collapse; min-width: 1250px; width: 100%; }
-    th, td {
-      padding: 9px 10px;
-      border-bottom: 1px solid var(--line);
-      text-align: right;
-      white-space: nowrap;
-      font-size: 0.86rem;
-    }
-    th {
-      color: #cbd5e1;
-      background: #111827;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      cursor: pointer;
-    }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--text); }
+    header { padding: 20px 24px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #111827, #0f172a); }
+    h1 { margin: 0 0 6px; font-size: 1.35rem; }
+    .sub { color: var(--muted); font-size: 0.88rem; }
+    main { padding: 14px 24px 28px; }
+    .manual-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; max-width: 980px; }
+    .manual-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+    .manual-title h2 { margin: 0; font-size: 1.02rem; }
+    .manual-title span { color: var(--muted); font-size: 0.82rem; }
+    .manual-grid { display: grid; grid-template-columns: minmax(280px, 360px) 130px 130px 130px 118px; gap: 10px; align-items: end; }
+    .manual-advanced { display: grid; grid-template-columns: repeat(4, 130px); gap: 10px; margin-top: 10px; }
+    label { display: block; color: var(--muted); font-size: 0.75rem; margin-bottom: 4px; }
+    input, select, button { background: #0b1220; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; font-size: 0.86rem; height: 36px; }
+    input, select { width: 100%; }
+    button { cursor: pointer; background: #123044; border-color: #245b7a; font-weight: 700; width: 118px; }
+    button:hover { background: #16445f; }
+    .manual-output { margin-top: 10px; padding: 10px; background: #0b1220; border: 1px solid var(--line); border-radius: 10px; min-height: 42px; color: var(--text); }
+    .manual-output strong { color: #bfdbfe; }
+    .hint { color: var(--muted); font-size: 0.76rem; margin-top: 8px; line-height: 1.35; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: #bfdbfe; font-size: 0.82rem; }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+    .controls input { min-width: 230px; max-width: 340px; }
+    .controls select { width: auto; min-width: 150px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+    table { border-collapse: collapse; min-width: 1350px; width: 100%; }
+    th, td { padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; font-size: 0.84rem; }
+    th { color: #cbd5e1; background: #111827; position: sticky; top: 0; z-index: 1; cursor: pointer; }
     td.left, th.left { text-align: left; }
     tr:hover { background: #172033; }
-    .pill {
-      display: inline-block;
-      min-width: 56px;
-      text-align: center;
-      padding: 3px 8px;
-      border-radius: 999px;
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
+    .pill { display: inline-block; min-width: 56px; text-align: center; padding: 3px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
     .high { background: var(--good); color: #dcfce7; }
     .medium { background: var(--med); color: #fef3c7; }
     .low { background: var(--low); color: #fee2e2; }
     .none { background: var(--none); color: #e5e7eb; }
     .ok { color: #86efac; }
+    .inactive { color: #93c5fd; }
     .skipped, .missing_model, .missing_raw, .empty_raw { color: #fca5a5; }
-    footer { color: var(--muted); font-size: 0.78rem; margin-top: 14px; line-height: 1.45; }
+    footer { color: var(--muted); font-size: 0.76rem; margin-top: 12px; line-height: 1.45; }
     a { color: var(--accent); }
+    @media (max-width: 1000px) {
+      .manual-panel { max-width: none; }
+      .manual-grid { grid-template-columns: 1fr 1fr; }
+      .manual-advanced { grid-template-columns: 1fr 1fr; }
+      button { width: 118px; }
+    }
   </style>
 </head>
 <body>
@@ -111,9 +72,57 @@
     <div class="sub" id="generated">Loading latest forecast output…</div>
   </header>
   <main>
-    <section class="cards" id="cards"></section>
+    <section class="manual-panel">
+      <div class="manual-title">
+        <h2>Manual what-if forecast</h2>
+        <span>Pick a model, enter current stage + 1h/3h rise rates.</span>
+      </div>
+      <div class="manual-grid">
+        <div>
+          <label for="manualLid">Forecast point / model</label>
+          <select id="manualLid"><option>Loading…</option></select>
+        </div>
+        <div>
+          <label for="manualStage">Current stage (ft)</label>
+          <input id="manualStage" type="number" step="0.01" placeholder="13.49" />
+        </div>
+        <div>
+          <label for="manualR1">1-hr rate (ft/hr)</label>
+          <input id="manualR1" type="number" step="0.01" placeholder="0.07" />
+        </div>
+        <div>
+          <label for="manualR3">3-hr rate (ft/hr)</label>
+          <input id="manualR3" type="number" step="0.01" placeholder="0.07" />
+        </div>
+        <button id="manualCalc">Calculate</button>
+      </div>
+      <details>
+        <summary>Optional advanced inputs</summary>
+        <div class="manual-advanced">
+          <div>
+            <label for="manualH0">H0 / rise start stage</label>
+            <input id="manualH0" type="number" step="0.01" placeholder="auto" />
+          </div>
+          <div>
+            <label for="manualElapsed">Elapsed rise hours</label>
+            <input id="manualElapsed" type="number" step="0.1" placeholder="auto" />
+          </div>
+          <div>
+            <label for="manualR6">6-hr rate</label>
+            <input id="manualR6" type="number" step="0.01" placeholder="same as 3h" />
+          </div>
+          <div>
+            <label for="manualR12">12-hr rate</label>
+            <input id="manualR12" type="number" step="0.01" placeholder="same as 6h" />
+          </div>
+        </div>
+      </details>
+      <div class="manual-output" id="manualOutput">Choose a point and enter values.</div>
+      <div class="hint">Manual mode uses trained equation coefficients embedded in latest_forecasts.json. If a point says no manual equation, rerun profile-forecast so the JSON includes model coefficients.</div>
+    </section>
+
     <section class="controls">
-      <input id="search" placeholder="Filter by LID, name, model, status…" />
+      <input id="search" placeholder="Filter table by LID, name, model, status…" />
       <select id="confidence">
         <option value="">All confidence levels</option>
         <option value="high">High</option>
@@ -124,11 +133,13 @@
       <select id="status">
         <option value="">All statuses</option>
         <option value="ok">OK</option>
+        <option value="inactive">Inactive</option>
         <option value="skipped">Skipped</option>
         <option value="missing_model">Missing model</option>
         <option value="missing_raw">Missing raw</option>
       </select>
     </section>
+
     <section class="table-wrap">
       <table>
         <thead>
@@ -136,6 +147,7 @@
             <th class="left" data-key="lid">LID</th>
             <th class="left" data-key="name">Name</th>
             <th data-key="current_stage_ft">Stage</th>
+            <th data-key="forecast_threshold_used_ft">Threshold</th>
             <th data-key="r1_ft_per_hr">1h rate</th>
             <th data-key="r3_ft_per_hr">3h rate</th>
             <th data-key="pred_remaining_rise_ft">Remain</th>
@@ -161,6 +173,7 @@
 
   <script>
     let forecasts = [];
+    let manualModels = {};
     let sortKey = 'lid';
     let sortDir = 1;
 
@@ -169,23 +182,135 @@
       const n = Number(x);
       return Number.isFinite(n) ? n.toFixed(d) : x;
     };
+    const num = (id) => {
+      const v = document.getElementById(id).value;
+      if (v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const getForecast = (lid) => forecasts.find(r => r.lid === lid) || {};
 
-    function card(label, value) {
-      return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    function ensureManualFallback() {
+      const hasManual = Object.keys(manualModels || {}).length > 0;
+      if (hasManual) return;
+      manualModels = {};
+      forecasts.forEach(r => {
+        manualModels[r.lid] = {
+          lid: r.lid,
+          name: r.name || '',
+          run_label: r.run_label || 'no model',
+          status: r.forecast_status || 'missing_equation',
+          profile_reason: r.profile_reason || '',
+          skill: {
+            mae_ft: r.model_mae_ft,
+            bias_ft: r.model_bias_ft,
+            event_count: r.model_event_count,
+            holdout_events: r.model_holdout_events,
+            r2: r.model_r2
+          },
+          overrides: {}
+        };
+      });
     }
 
-    function renderCards(data) {
-      const ok = data.filter(r => r.forecast_status === 'ok').length;
-      const skipped = data.filter(r => r.forecast_status === 'skipped').length;
-      const high = data.filter(r => r.confidence === 'high').length;
-      const med = data.filter(r => r.confidence === 'medium').length;
-      document.getElementById('cards').innerHTML = [
-        card('Total LIDs', data.length),
-        card('Forecast OK', ok),
-        card('High confidence', high),
-        card('Medium confidence', med),
-        card('Skipped / unavailable', skipped)
-      ].join('');
+    function populateManualChoices() {
+      ensureManualFallback();
+      const sel = document.getElementById('manualLid');
+      const lids = Object.keys(manualModels).sort();
+      if (!lids.length) {
+        sel.innerHTML = '<option>No forecast points found</option>';
+        document.getElementById('manualOutput').textContent = 'No forecast points found in latest_forecasts.json.';
+        return;
+      }
+      sel.innerHTML = lids.map(lid => {
+        const m = manualModels[lid] || {};
+        const hasEq = !!m.equation;
+        const label = `${lid} — ${m.name || ''} (${m.run_label || 'no model'})${hasEq ? '' : ' — no manual equation'}`;
+        return `<option value="${lid}">${label}</option>`;
+      }).join('');
+      const first = lids.find(lid => manualModels[lid]?.equation) || lids[0];
+      sel.value = first;
+      prefillManualFromLatest();
+    }
+
+    function prefillManualFromLatest() {
+      const lid = document.getElementById('manualLid').value;
+      const r = getForecast(lid);
+      if (r.current_stage_ft !== undefined && r.current_stage_ft !== '') document.getElementById('manualStage').value = r.current_stage_ft;
+      if (r.r1_ft_per_hr !== undefined && r.r1_ft_per_hr !== '') document.getElementById('manualR1').value = r.r1_ft_per_hr;
+      if (r.r3_ft_per_hr !== undefined && r.r3_ft_per_hr !== '') document.getElementById('manualR3').value = r.r3_ft_per_hr;
+      if (manualModels[lid]?.equation) {
+        document.getElementById('manualOutput').textContent = 'Latest values filled. Edit inputs and calculate.';
+      } else {
+        document.getElementById('manualOutput').textContent = 'Dropdown loaded, but this JSON has no manual equation for that point. Rerun profile-forecast after the latest patch.';
+      }
+    }
+
+    function manualCalc() {
+      const lid = document.getElementById('manualLid').value;
+      const m = manualModels[lid];
+      const out = document.getElementById('manualOutput');
+      if (!m || !m.equation) { out.textContent = 'No trained model equation available for that point. Rerun profile-forecast so latest_forecasts.json includes manual_models.'; return; }
+
+      const stage = num('manualStage');
+      const r1 = num('manualR1');
+      const r3 = num('manualR3');
+      if (stage === null || r1 === null || r3 === null) { out.textContent = 'Enter current stage, 1-hour rate, and 3-hour rate.'; return; }
+
+      const r6 = num('manualR6') ?? r3;
+      const r12 = num('manualR12') ?? r6;
+      const h0Default = stage - Math.max(0, r3) * 3;
+      const h0 = num('manualH0') ?? h0Default;
+      const elapsedDefault = Math.max(0, Math.min(48, Math.abs(stage - h0) / Math.max(Math.abs(r3), 0.01)));
+      const elapsed = num('manualElapsed') ?? elapsedDefault;
+
+      const features = {
+        stage_ft: stage,
+        h0_stage_ft: h0,
+        elapsed_hr_since_rise_start: elapsed,
+        r1_ft_per_hr: r1,
+        r3_ft_per_hr: r3,
+        r6_ft_per_hr: r6,
+        r12_ft_per_hr: r12,
+        momentum_r1_minus_r3: r1 - r3,
+        momentum_r3_minus_r6: r3 - r6,
+        stage_above_h0_ft: stage - h0
+      };
+
+      const eq = m.equation;
+      let remaining = Number(eq.intercept || 0);
+      for (const [key, coef] of Object.entries(eq.coefficients || {})) {
+        remaining += Number(coef) * Number(features[key] || 0);
+      }
+      remaining = Math.max(0, remaining);
+
+      const cap = Number(m.overrides?.max_remaining_rise_ft);
+      let capNote = '';
+      if (Number.isFinite(cap) && remaining > cap) {
+        remaining = cap;
+        capNote = ` capped at ${fmt(cap)} ft`;
+      }
+
+      const likely = stage + remaining;
+      const skill = m.skill || {};
+      const modelSkill = m.model_skill || {};
+      const mae = Number(skill.mae_ft);
+      const bias = Number(skill.bias_ft) || 0;
+      const under75 = Number(modelSkill.underforecast_p75_ft);
+      const under90 = Number(modelSkill.underforecast_p90_ft);
+      const p75 = Number.isFinite(under75) ? under75 : (Number.isFinite(mae) ? mae : 0);
+      const p90 = Number.isFinite(under90) ? under90 : (Number.isFinite(mae) ? mae * 1.5 : 0);
+      const biasCorrected = likely - bias;
+      const conservative = Math.max(likely, biasCorrected + Math.max(0, p75));
+      const highEnd = Math.max(conservative, biasCorrected + Math.max(0, p90));
+
+      out.innerHTML = `
+        <strong>${lid}</strong> manual forecast using <strong>${m.run_label}</strong>: 
+        remaining rise <strong>${fmt(remaining)}</strong> ft${capNote}; 
+        likely crest <strong>${fmt(likely)}</strong> ft; 
+        conservative <strong>${fmt(conservative)}</strong> ft; 
+        high-end <strong>${fmt(highEnd)}</strong> ft.
+        <br><span class="sub">Assumed H0 ${fmt(h0)} ft, elapsed ${fmt(elapsed, 1)} hr, r6 ${fmt(r6)} ft/hr, r12 ${fmt(r12)} ft/hr. MAE ${fmt(mae)} ft.</span>`;
     }
 
     function filtered() {
@@ -193,8 +318,9 @@
       const conf = document.getElementById('confidence').value;
       const status = document.getElementById('status').value;
       return forecasts.filter(r => {
-        const text = `${r.lid} ${r.name} ${r.run_label} ${r.forecast_status} ${r.forecast_note}`.toLowerCase();
-        return (!q || text.includes(q)) && (!conf || r.confidence === conf) && (!status || r.forecast_status === status);
+        const text = `${r.lid} ${r.name} ${r.run_label} ${r.forecast_status} ${r.forecast_note} ${r.override_notes}`.toLowerCase();
+        const hideSkippedByDefault = !status && r.forecast_status === 'skipped';
+        return !hideSkippedByDefault && (!q || text.includes(q)) && (!conf || r.confidence === conf) && (!status || r.forecast_status === status);
       }).sort((a, b) => {
         const av = a[sortKey] ?? '';
         const bv = b[sortKey] ?? '';
@@ -206,12 +332,12 @@
 
     function render() {
       const data = filtered();
-      renderCards(data);
       document.getElementById('rows').innerHTML = data.map(r => `
         <tr>
           <td class="left"><strong>${r.lid || ''}</strong></td>
           <td class="left">${r.name || ''}</td>
           <td>${fmt(r.current_stage_ft)}</td>
+          <td>${fmt(r.forecast_threshold_used_ft)}</td>
           <td>${fmt(r.r1_ft_per_hr)}</td>
           <td>${fmt(r.r3_ft_per_hr)}</td>
           <td>${fmt(r.pred_remaining_rise_ft)}</td>
@@ -239,10 +365,12 @@
     document.getElementById('search').addEventListener('input', render);
     document.getElementById('confidence').addEventListener('change', render);
     document.getElementById('status').addEventListener('change', render);
+    document.getElementById('manualLid').addEventListener('change', prefillManualFromLatest);
+    document.getElementById('manualCalc').addEventListener('click', manualCalc);
 
     const payload = {
   "generated_utc": "2026-06-08T10:25:14.828415+00:00",
-  "count": 32,
+  "count": 30,
   "forecasts": [
     {
       "lid": "DARL1",
@@ -783,68 +911,6 @@
       "confidence": "none"
     },
     {
-      "lid": "BXAL1",
-      "name": "Pearl River at Bogalusa",
-      "usgs_site": "02489500",
-      "profile_event_set": "flood",
-      "run_label": "flood_plus",
-      "profile_reason": "solid flood-plus baseline",
-      "forecast_status": "ok",
-      "forecast_note": "current stage at/above event-start threshold",
-      "forecast_time_utc": "2026-05-29T13:45:00+00:00",
-      "generated_utc": "2026-06-08T10:25:08.108746+00:00",
-      "current_stage_ft": 16.327,
-      "h0_stage_ft": 15.78,
-      "elapsed_hr_since_rise_start": 24.75,
-      "r1_ft_per_hr": 0.017,
-      "r3_ft_per_hr": 0.014,
-      "r6_ft_per_hr": 0.014,
-      "r12_ft_per_hr": 0.023,
-      "event_start_threshold_used_ft": 16.0,
-      "model_mae_ft": 0.635,
-      "model_bias_ft": -0.005,
-      "model_event_count": 18.0,
-      "model_holdout_events": 5.0,
-      "model_r2": 0.698,
-      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/BXAL1_flood_plus_ridge_model.joblib",
-      "pred_remaining_rise_ft": 1.697,
-      "pred_crest_likely_ft": 18.023,
-      "pred_crest_conservative_ft": 18.11,
-      "pred_crest_high_end_ft": 18.448,
-      "confidence": "high"
-    },
-    {
-      "lid": "PERL1",
-      "name": "Pearl River near Pearl River",
-      "usgs_site": "02492600",
-      "profile_event_set": "flood",
-      "run_label": "flood_plus",
-      "profile_reason": "flood-plus baseline selected despite good sparse moderate score",
-      "forecast_status": "ok",
-      "forecast_note": "current stage at/above event-start threshold",
-      "forecast_time_utc": "2026-06-08T10:00:00+00:00",
-      "generated_utc": "2026-06-08T10:25:08.941286+00:00",
-      "current_stage_ft": 12.13,
-      "h0_stage_ft": 11.42,
-      "elapsed_hr_since_rise_start": 40.5,
-      "r1_ft_per_hr": 0.01,
-      "r3_ft_per_hr": 0.013,
-      "r6_ft_per_hr": 0.013,
-      "r12_ft_per_hr": 0.017,
-      "event_start_threshold_used_ft": 12.0,
-      "model_mae_ft": 0.221,
-      "model_bias_ft": 0.156,
-      "model_event_count": 15.0,
-      "model_holdout_events": 4.0,
-      "model_r2": 0.774,
-      "model_file": "/home/runner/work/River-stats-for-modeling/River-stats-for-modeling/output/models/PERL1_flood_plus_ridge_model.joblib",
-      "pred_remaining_rise_ft": 0.472,
-      "pred_crest_likely_ft": 12.602,
-      "pred_crest_conservative_ft": 12.602,
-      "pred_crest_high_end_ft": 12.725,
-      "confidence": "high"
-    },
-    {
       "lid": "MNLM6",
       "name": "West Hobolochitto Creek near McNeil",
       "usgs_site": "02492360",
@@ -1073,7 +1139,8 @@
       "confidence": "none"
     }
   ]
-};
+}
+;
     forecasts = payload.forecasts || [];
     document.getElementById('generated').textContent = `Generated UTC: ${payload.generated_utc || 'unknown'} · ${forecasts.length} LIDs`;
     render();
