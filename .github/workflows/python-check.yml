@@ -42,3 +42,7 @@ jobs:
           python src/train_model_profiles.py --help
           python src/forecast_profiles.py --help
           python src/build_standalone_dashboard.py --help
+
+      - name: Run pytest
+        run: |
+          pytest
