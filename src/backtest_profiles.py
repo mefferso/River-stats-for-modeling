@@ -151,6 +151,47 @@ def add_bins(rows: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _first_or_blank(group: pd.DataFrame, column: str) -> Any:
+    if column not in group.columns or group[column].empty:
+        return ""
+    values = group[column].dropna()
+    if values.empty:
+        return ""
+    return values.iloc[0]
+
+
+def add_event_metadata_to_training_rows(train: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
+    """Attach event-level metadata that feature_rows intentionally does not model on.
+
+    The shared feature builder keeps the modeling rows lean. Backtest reports still
+    need event metadata such as crest_time, so merge those columns back in by
+    event_id after feature generation.
+    """
+    if train.empty or events.empty or "event_id" not in train.columns or "event_id" not in events.columns:
+        return train
+
+    metadata_cols = [
+        col
+        for col in [
+            "event_id",
+            "start_time",
+            "rise_start_time",
+            "crest_time",
+            "end_time",
+            "crest_stage_ft",
+            "total_rise_ft",
+            "duration_hr",
+            "rise_duration_hr",
+        ]
+        if col in events.columns and col not in train.columns
+    ]
+    if len(metadata_cols) <= 1:
+        return train
+
+    metadata = events[metadata_cols].drop_duplicates("event_id")
+    return train.merge(metadata, on="event_id", how="left")
+
+
 def event_worst_errors(rows: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "lid",
@@ -186,7 +227,7 @@ def event_worst_errors(rows: pd.DataFrame) -> pd.DataFrame:
                 "mean_error_ft": float(error.mean()),
                 "mae_ft": float(abs_error.mean()),
                 "underforecast_frequency": float((error < 0).mean()),
-                "crest_time": group["crest_time"].iloc[0],
+                "crest_time": _first_or_blank(group, "crest_time"),
                 "observed_crest_stage_ft": float(group["observed_crest_stage_ft"].iloc[0]),
             }
         )
@@ -257,6 +298,7 @@ def backtest_profile(
         }
 
     train = base.feature_rows(raw, events, lid, sample_interval=settings.sample_interval)
+    train = add_event_metadata_to_training_rows(train, events)
     event_count = int(train["event_id"].nunique()) if not train.empty else 0
     if len(train) < args.min_training_rows or event_count < args.min_events:
         return pd.DataFrame(), {
