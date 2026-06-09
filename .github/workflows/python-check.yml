@@ -32,6 +32,7 @@ jobs:
           python -m py_compile src/train_model_profiles.py
           python -m py_compile src/forecast_profiles.py
           python -m py_compile src/build_standalone_dashboard.py
+          python -m py_compile src/validate_config.py
 
       - name: Show CLI help
         run: |
@@ -42,6 +43,11 @@ jobs:
           python src/train_model_profiles.py --help
           python src/forecast_profiles.py --help
           python src/build_standalone_dashboard.py --help
+          python src/validate_config.py --help
+
+      - name: Validate config
+        run: |
+          python src/validate_config.py
 
       - name: Run pytest
         run: |
