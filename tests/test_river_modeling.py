@@ -47,18 +47,21 @@ def forecast_args(**overrides: float) -> Namespace:
 def test_stage_cleaning_drops_sentinel_junk_and_preserves_valid_rows(tmp_path: Path) -> None:
     raw = pd.DataFrame(
         {
-            "datetime": pd.date_range("2024-01-01", periods=6, freq="h", tz="UTC"),
-            "stage_ft": [1.2, "bad", -9999, 199.9, 200.0, 3.4],
+            "datetime": pd.date_range("2024-01-01", periods=11, freq="h", tz="UTC"),
+            "stage_ft": ["", np.nan, -999999, -1000, -1001, "bad", 1.2, 199.9, 200.0, 250.0, 3.4],
         }
     )
 
-    cleaned_forecast = forecast_profiles.clean_raw_stage(raw)
-    assert cleaned_forecast["stage_ft"].tolist() == [1.2, 199.9, 3.4]
+    cleaned_base = base.clean_stage_data(raw)
+    assert cleaned_base["stage_ft"].tolist() == [1.2, 199.9, 3.4]
 
     raw_path = tmp_path / "TEST_usgs_stage.csv"
     raw.to_csv(raw_path, index=False)
     cleaned_training = train_model_profiles.read_clean_raw(raw_path)
     assert cleaned_training["stage_ft"].tolist() == [1.2, 199.9, 3.4]
+
+    smoothed = base.prep_stage(raw, freq="1h")
+    assert smoothed["stage_ft"].between(-1000, 200, inclusive="neither").all()
 
 
 def test_event_detection_uses_thresholds_and_filters_by_min_crest() -> None:
@@ -177,7 +180,7 @@ def test_forecast_one_returns_inactive_without_prediction_and_ok_when_active(tmp
     assert inactive["confidence"] == "none"
     assert "pred_remaining_rise_ft" not in inactive
 
-    active_raw = stage_series([8.0, 8.4, 8.8, 9.2, 9.6, 10.1], freq="h")
+    active_raw = stage_series([8.0, 8.4, 8.8, 9.2, 9.6, 10.1, 250.0], freq="h")
     active_raw.to_csv(raw_dir / "TEST_usgs_stage.csv", index=False)
     active = forecast_profiles.forecast_one(
         site,
@@ -188,6 +191,7 @@ def test_forecast_one_returns_inactive_without_prediction_and_ok_when_active(tmp
     )
 
     assert active["forecast_status"] == "ok"
+    assert active["current_stage_ft"] < 11.0
     assert active["confidence"] == "high"
     assert active["pred_remaining_rise_ft"] == pytest.approx(2.0)
     assert active["pred_crest_likely_ft"] == pytest.approx(active["current_stage_ft"] + 2.0)
