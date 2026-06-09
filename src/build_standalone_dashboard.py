@@ -6,17 +6,36 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-FETCH_BLOCK = """fetch('latest_forecasts.json')
-      .then(r => r.json())
-      .then(payload => {
-        forecasts = payload.forecasts || [];
-        document.getElementById('generated').textContent = `Generated UTC: ${payload.generated_utc || 'unknown'} · ${forecasts.length} LIDs`;
-        render();
-      })
-      .catch(err => {
-        document.getElementById('generated').textContent = 'No latest_forecasts.json found yet. Run the forecast workflow first.';
-        console.error(err);
-      });"""
+FETCH_START = "    fetch('latest_forecasts.json')"
+FETCH_END = "      });"
+
+
+def replace_forecast_fetch_block(html: str, payload: str) -> str:
+    """Replace the dashboard's runtime JSON fetch block with embedded JSON.
+
+    The dashboard template can evolve as the front-end gains new fields.  The
+    previous implementation matched one exact JavaScript block, which broke as
+    soon as manual_models support was added.  Instead, find the fetch block by
+    its stable start/end markers and replace the whole block.
+    """
+
+    start = html.find(FETCH_START)
+    if start == -1:
+        raise SystemExit("Could not find latest_forecasts.json fetch block in dashboard template")
+
+    end = html.find(FETCH_END, start)
+    if end == -1:
+        raise SystemExit("Could not find end of latest_forecasts.json fetch block in dashboard template")
+    end += len(FETCH_END)
+
+    replacement = f"""const payload = {payload};
+    forecasts = payload.forecasts || [];
+    manualModels = payload.manual_models || {{}};
+    document.getElementById('generated').textContent = `Generated UTC: ${{payload.generated_utc || 'unknown'}} · ${{forecasts.length}} LIDs`;
+    populateManualChoices();
+    render();"""
+
+    return html[:start] + replacement + html[end:]
 
 
 def main() -> None:
@@ -32,16 +51,10 @@ def main() -> None:
 
     html = template.read_text(encoding="utf-8")
     payload = json_path.read_text(encoding="utf-8")
-    replacement = f"""const payload = {payload};
-    forecasts = payload.forecasts || [];
-    document.getElementById('generated').textContent = `Generated UTC: ${{payload.generated_utc || 'unknown'}} · ${{forecasts.length}} LIDs`;
-    render();"""
-
-    if FETCH_BLOCK not in html:
-        raise SystemExit("Could not find forecast fetch block in dashboard template")
+    standalone_html = replace_forecast_fetch_block(html, payload)
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(html.replace(FETCH_BLOCK, replacement), encoding="utf-8")
+    output.write_text(standalone_html, encoding="utf-8")
     print(f"Wrote {output}")
 
 
